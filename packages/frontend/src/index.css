@@ -1,0 +1,68 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Base styles */
+@layer base {
+    html {
+        @apply scroll-smooth; /* Smooth scrolling for anchor links etc. */
+    }
+    body {
+        @apply bg-gradient-to-br from-gray-100 to-blue-100 dark:from-gray-900 dark:to-slate-800; /* Subtle gradient */
+        @apply text-gray-800 dark:text-gray-200 transition-colors duration-300;
+        @apply font-sans antialiased; /* Apply sans font family from Tailwind config */
+        min-height: 100vh;
+        text-rendering: optimizeLegibility;
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+    }
+    /* Add focus-visible polyfill styles if needed */
+    /*:focus-visible { outline: 2px solid theme('colors.kintask-blue.DEFAULT'); outline-offset: 2px; }*/
+}
+
+
+/* Custom scrollbar styles using tailwind-scrollbar */
+@layer utilities {
+    .scrollbar {
+        --scrollbar-track-color: transparent;
+        --scrollbar-thumb-color: theme('colors.gray.300');
+        --scrollbar-thumb-hover-color: theme('colors.gray.400');
+        scrollbar-width: thin;
+        scrollbar-color: var(--scrollbar-thumb-color) var(--scrollbar-track-color);
+    }
+    .dark .scrollbar {
+        --scrollbar-thumb-color: theme('colors.gray.600');
+        --scrollbar-thumb-hover-color: theme('colors.gray.500');
+    }
+    .scrollbar::-webkit-scrollbar {
+        width: 6px;
+        height: 6px;
+    }
+    .scrollbar::-webkit-scrollbar-track {
+        background-color: var(--scrollbar-track-color);
+        border-radius: 3px;
+    }
+    .scrollbar::-webkit-scrollbar-thumb {
+        background-color: var(--scrollbar-thumb-color);
+        border-radius: 3px;
+        transition: background-color 0.2s ease-in-out;
+    }
+     .scrollbar::-webkit-scrollbar-thumb:hover {
+         background-color: var(--scrollbar-thumb-hover-color);
+     }
+}
+
+
+/* Animation utility (using built-in Tailwind animation classes is often preferred) */
+ /* @layer utilities {
+    .animate-fade-in {
+        animation: fadeIn 0.4s ease-out forwards;
+    }
+ } */
+
+/* Example component style override */
+/* @layer components {
+    .btn-primary {
+        @apply px-4 py-2 bg-kintask-blue text-white rounded hover:bg-kintask-blue-dark focus:outline-none focus:ring-2 focus:ring-kintask-blue focus:ring-offset-2 transition-colors;
+    }
+} */

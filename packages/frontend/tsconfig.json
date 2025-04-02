@@ -1,0 +1,33 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "useDefineForClassFields": true,
+    "lib": ["ES2020", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "skipLibCheck": true,
+
+    /* Bundler mode */
+    "moduleResolution": "bundler", // Use "bundler" for Vite
+    "allowImportingTsExtensions": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noEmit": true,
+    "jsx": "react-jsx", // Standard for React 17+
+
+    /* Linting */
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "forceConsistentCasingInFileNames": true, // Recommended
+
+     /* Path Aliases */
+     "baseUrl": ".", // Base URL for path resolution
+     "paths": {
+       "@/*": ["./src/*"] // Alias @/* to src/*
+     }
+  },
+  "include": ["src", "vite.config.ts", "tailwind.config.js", "postcss.config.js"], // Include config files
+  "references": [{ "path": "./tsconfig.node.json" }], // Reference for Node-specific config (e.g., Vite config checks)
+  "exclude": ["node_modules", "dist"] // Exclude build output and dependencies
+}

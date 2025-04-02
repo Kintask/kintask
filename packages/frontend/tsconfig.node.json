@@ -1,0 +1,11 @@
+ {
+   "compilerOptions": {
+     "composite": true, // Required for project references
+     "skipLibCheck": true,
+     "module": "ESNext", // Use ESNext for modern Node environments
+     "moduleResolution": "bundler", // Align with main tsconfig
+     "allowSyntheticDefaultImports": true, // Common setting for Node modules
+     "strict": true // Apply strict checks to config files too
+   },
+   "include": ["vite.config.ts"] // Specify which files this config applies to
+ }

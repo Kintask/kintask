@@ -1,0 +1,5 @@
+# kintask/pnpm-workspace.yaml
+packages:
+  - 'packages/*'
+  # Optionally include scripts if it has its own package.json
+  # - 'scripts'
