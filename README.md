@@ -22,20 +22,19 @@ Kintask tackles these issues head-on by integrating best-in-class decentralized 
 
 ## Architecture Diagram (Kintask)
 
-```mermaid
 graph LR
-    subgraph User Browser (React Frontend)
+    subgraph "User Browser (React Frontend)"
         UI[Chat Interface] -- 1. Ask Question --> APIClient[API Client (axios)]
     end
 
-    subgraph Backend Server (Node.js/Express)
+    subgraph "Backend Server (Node.js/Express)"
         APIClient -- 2. POST /api/verify --> Routes[/api/verify route]
         Routes -- 3. --> Controller[Verify Controller]
         Controller -- 4. Question --> Generator[Generator Service (OpenAI)]
         Generator -- 5. Answer --> Controller
         Controller -- 6. Q+A --> Verifier[Verifier Service]
 
-        subgraph Verification Process within Verifier Service
+        subgraph "Verification Process within Verifier Service"
             Verifier -- 7. Identify Needed Knowledge --> Index[KG Index (local/cached)]
             Index -- 8. Get Relevant CIDs --> Verifier
             Verifier -- 9. Fetch Fragments (by CIDs) --> FilecoinSvc[Filecoin Service (Web3.storage)]
@@ -55,10 +54,11 @@ graph LR
         Routes -- 21. JSON Response --> APIClient
     end
 
-    subgraph Asynchronous Reveal (Backend Listener / Separate Process)
+    subgraph "Asynchronous Reveal (Backend Listener / Separate Process)"
         L2Contract -- 22. receiveBlocklock Callback (after delay) --> Listener[Timelock Listener Service]
         Listener -- 23. Decrypt Verdict --> Listener
         Listener -- 24. Log Reveal to Recall --> RecallSvc
     end
 
-    APIClient -- 25. Display Result w/ Links & Trace --> UI# kintask
+    APIClient -- 25. Display Result w/ Links & Trace --> UI
+
