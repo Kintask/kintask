@@ -21,7 +21,7 @@ Kintask tackles these issues head-on by integrating best-in-class decentralized 
 *   **Synergy:** Filecoin provides the *verifiable data*, Recall provides the *verifiable process*, and Timelock Encryption provides the *verifiable commitment*, creating a holistic trust layer for AI Q&A.
 
 ## Architecture Diagram (Kintask)
-
+```
 graph LR
     subgraph "User Browser (React Frontend)"
         UI[Chat Interface] -- 1. Ask Question --> APIClient[API Client (axios)]
