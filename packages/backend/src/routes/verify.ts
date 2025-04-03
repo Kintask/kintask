@@ -8,16 +8,11 @@ const router = Router();
  * @description Endpoint to receive a question, generate an answer, verify it,
  *              commit the verdict via timelock, log the process to Recall,
  *              and return the results.
- * @body { "question": "string" } - The user's question.
+ * @body { "question": "string" } - The user's question. Max length ~1500 chars recommended.
  * @returns {ApiVerifyResponse} 200 - Success response with answer, status, proofs.
- * @returns {object} 400 - Invalid request body.
+ * @returns {object} 400 - Invalid request body (missing question, too long, etc.).
  * @returns {object} 500 - Internal server error during processing.
  */
 router.post('/verify', handleVerifyRequest);
-
-// Example: Add a route to get server status or config (for debugging)
-// router.get('/status', (req, res) => {
-//     res.json({ status: 'ok', timestamp: new Date().toISOString() });
-// });
 
 export default router;

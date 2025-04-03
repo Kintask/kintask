@@ -1,129 +1,108 @@
 import { Request, Response, NextFunction } from 'express';
 import { generateAnswer } from '../services/generatorService';
 import { performVerification } from '../services/verifierService';
-import { logRecallEvent, getSimulatedTrace } from '../services/recallService';
+import { logRecallEvent, getTraceFromRecall } from '../services/recallService';
 import { VerificationResultInternal, ApiVerifyResponse } from '../types';
 import { getL2ExplorerUrl } from '../utils';
-import config from '../config'; // Already validated in config.ts
+import config from '../config'; // Import config if needed for L2 Chain ID for explorer
 
 export async function handleVerifyRequest(req: Request, res: Response, next: NextFunction): Promise<void> {
   const { question } = req.body;
   const requestTimestamp = new Date().toISOString();
-  // More robust unique context ID
-  const uniqueRequestContext = `req_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 10)}`;
+  // Create a unique context ID for this specific request to correlate Recall logs
+  const uniqueRequestContext = `req_${Date.now()}_${Math.random().toString(16).substring(2, 8)}`;
 
-  // Input Validation
-  if (!question || typeof question !== 'string' || question.trim().length === 0) {
+  // --- Input Validation ---
+  if (!question || typeof question !== 'string' || question.trim() === '') {
     res.status(400).json({ error: 'Invalid request body. Non-empty "question" string is required.' });
     return;
   }
-  // Optional: Limit question length
-  const MAX_QUESTION_LENGTH = 1000;
-  if (question.length > MAX_QUESTION_LENGTH) {
-       res.status(400).json({ error: `Question exceeds maximum length (${MAX_QUESTION_LENGTH} characters).` });
+  if (question.length > 1500) { // Limit question length
+       res.status(400).json({ error: 'Question exceeds maximum length (1500 characters).' });
        return;
   }
 
   let verificationResult: VerificationResultInternal | null = null;
-  let generatedAnswer = "Processing..."; // Initial state
-  let responseStatus = 500; // Default to internal error
-  let responsePayload: Partial<ApiVerifyResponse> = {
-      answer: "Failed to process request.", // Default error answer
-      status: "Error: Verification Failed",
-  };
+  let finalAnswer = "Processing..."; // Initial state
 
   console.log(`[Controller] Handling request ${uniqueRequestContext} for question: "${question.substring(0, 50)}..."`);
   try {
-    // Log Start
-    await logRecallEvent('VERIFICATION_START', { question }, uniqueRequestContext);
+    // --- Log Start ---
+    // Use await to ensure start is logged before proceeding, good for tracing flows
+    await logRecallEvent('VERIFICATION_START', { question: question.substring(0, 200) + (question.length > 200 ? '...' : '') }, uniqueRequestContext);
 
-    // 1. Generate Answer
-    generatedAnswer = await generateAnswer(question);
-    if (generatedAnswer.startsWith('Error:')) {
-         await logRecallEvent('VERIFICATION_ERROR', { step: 'Generator', error: generatedAnswer }, uniqueRequestContext);
-         // Use the error message as the answer, but set error status
-         responsePayload = {
-             answer: generatedAnswer,
-             status: 'Error: Verification Failed',
-             error: 'Failed during answer generation.',
-             details: generatedAnswer,
-         };
-         responseStatus = 500; // Keep as internal error
-         // No throw here, proceed to send response in finally block
-    } else {
-        // 2. Perform Verification (Core logic) - only if generation succeeded
-        verificationResult = await performVerification(question, generatedAnswer, uniqueRequestContext);
-
-        // Handle case where verification service indicates failure (performVerification should always return a result now)
-        if (verificationResult.finalVerdict.startsWith('Error:')) {
-            const errorMsg = verificationResult.finalVerdict;
-            // Error should have been logged within performVerification or its sub-services
-            // await logRecallEvent('VERIFICATION_ERROR', { step: 'Verifier', error: errorMsg }, uniqueRequestContext); // Potentially redundant
-            responsePayload = {
-                answer: generatedAnswer, // Still return the generated answer
-                status: errorMsg,
-                error: 'Verification process failed.',
-                details: errorMsg, // Use the status as details
-                usedFragmentCids: verificationResult.usedFragmentCids, // Include partial results
-                timelockRequestId: verificationResult.timelockRequestId,
-                timelockTxExplorerUrl: verificationResult.timelockCommitTxHash ? getL2ExplorerUrl(verificationResult.timelockCommitTxHash) : undefined,
-                ciphertextHash: verificationResult.ciphertextHash
-            };
-            responseStatus = 500; // Keep as internal error
-            // No throw here, proceed to send response in finally block
-        } else {
-            // SUCCESS PATH
-            await logRecallEvent(
-                'FINAL_VERDICT_CALCULATED', // Log verdict as calculated (pre-reveal)
-                {
-                    calculatedVerdict: verificationResult.finalVerdict,
-                    confidence: verificationResult.confidenceScore,
-                    usedCids: verificationResult.usedFragmentCids,
-                    timelockRequestId: verificationResult.timelockRequestId,
-                },
-                uniqueRequestContext
-            );
-            await logRecallEvent('VERIFICATION_COMPLETE', { status: verificationResult.finalVerdict }, uniqueRequestContext);
-
-            // Prepare SUCCESS API Response Payload
-            responsePayload = {
-                answer: generatedAnswer,
-                status: verificationResult.finalVerdict,
-                confidence: verificationResult.confidenceScore,
-                usedFragmentCids: verificationResult.usedFragmentCids,
-                timelockRequestId: verificationResult.timelockRequestId,
-                timelockTxExplorerUrl: verificationResult.timelockCommitTxHash
-                    ? getL2ExplorerUrl(verificationResult.timelockCommitTxHash)
-                    : undefined,
-                ciphertextHash: verificationResult.ciphertextHash
-                // recallTrace will be added in the finally block
-                // recallExplorerUrl: // TODO: Add if Recall provides one
-            };
-            responseStatus = 200; // Set success status
-            console.log(`[Controller] Verification successful for request ${uniqueRequestContext}. Status: ${verificationResult.finalVerdict}`);
-        }
+    // --- 1. Generate Answer (Mocked) ---
+    finalAnswer = await generateAnswer(question);
+    // Check if mock returned an error string
+    if (finalAnswer.startsWith('Error:')) {
+         await logRecallEvent('VERIFICATION_ERROR', { step: 'GeneratorMock', error: finalAnswer }, uniqueRequestContext);
+         throw new Error(`Mock Generator failed: ${finalAnswer}`);
     }
-  } catch (error: any) {
-    // Catch unexpected errors during the flow (e.g., network issues before logging)
-    console.error(`[Controller Critical Error Request: ${uniqueRequestContext}]:`, error.message, error.stack);
-    // Ensure error is logged to Recall if possible
-    await logRecallEvent('VERIFICATION_ERROR', { controllerError: error.message, stack: error.stack?.substring(0, 200) }, uniqueRequestContext)
-        .catch(logErr => console.error("Failed to log critical controller error to Recall:", logErr)); // Avoid crashing if logging fails
+    await logRecallEvent('GENERATOR_MOCK_USED', { question: question.substring(0, 50) + '...', generatedAnswer: finalAnswer.substring(0, 50) + '...' }, uniqueRequestContext);
 
-    // Prepare ERROR API Response Payload for unexpected errors
-    responsePayload = {
-        answer: generatedAnswer === "Processing..." ? "Failed due to an unexpected server error." : generatedAnswer,
-        status: verificationResult?.finalVerdict || 'Error: Verification Failed', // Use last known status if available
-        error: 'An unexpected server error occurred.',
-        details: error.message,
-        // recallTrace will be added in finally block
+
+    // --- 2. Perform Verification ---
+    verificationResult = await performVerification(question, finalAnswer, uniqueRequestContext);
+
+    // Handle critical failure within the verification service itself
+    if (!verificationResult) {
+        await logRecallEvent('VERIFICATION_ERROR', { step: 'Verifier', error: "Verifier service returned null" }, uniqueRequestContext);
+        throw new Error("Verification service failed to produce a result.");
+    }
+    // Handle error status returned by the verifier (e.g., Timelock Failed)
+    if (verificationResult.finalVerdict.startsWith('Error:')) {
+         console.warn(`[Controller] Verification completed with error status: ${verificationResult.finalVerdict}`);
+         // Error already logged within performVerification via addStep
+         // We will still return a 200 OK but include the error status in the payload
+    } else {
+        // Log successful completion calculation only if no error status from verifier
+        await logRecallEvent(
+            'FINAL_VERDICT_CALCULATED',
+            {
+                calculatedVerdict: verificationResult.finalVerdict,
+                confidence: verificationResult.confidenceScore,
+                usedCidsCount: verificationResult.usedFragmentCids.length,
+                timelockRequestId: verificationResult.timelockRequestId,
+            },
+            uniqueRequestContext
+        );
+    }
+
+    // Log completion of controller handling for this request
+    await logRecallEvent('VERIFICATION_COMPLETE', { finalStatus: verificationResult.finalVerdict }, uniqueRequestContext);
+
+    // --- 3. Prepare SUCCESS API Response Payload ---
+    const recallTrace = await getTraceFromRecall(uniqueRequestContext); // Fetch trace for response
+    const responsePayload: ApiVerifyResponse = {
+        answer: finalAnswer,
+        status: verificationResult.finalVerdict,
+        confidence: verificationResult.confidenceScore,
+        usedFragmentCids: verificationResult.usedFragmentCids,
+        timelockRequestId: verificationResult.timelockRequestId,
+        timelockTxExplorerUrl: verificationResult.timelockCommitTxHash
+            ? getL2ExplorerUrl(verificationResult.timelockCommitTxHash) // Util handles undefined RPC/ChainID
+            : undefined,
+        recallTrace: recallTrace,
+        // recallExplorerUrl: // TODO: Add if Recall provides one based on context/trace ID
     };
-    responseStatus = 500;
-  } finally {
-      // Always retrieve and add the trace (even on error)
-      responsePayload.recallTrace = getSimulatedTrace(uniqueRequestContext);
-      // Send the response
-      console.log(`[Controller] Sending final response for ${uniqueRequestContext} with status ${responseStatus}`);
-      res.status(responseStatus).json(responsePayload);
+
+    console.log(`[Controller] Sending successful response for request ${uniqueRequestContext}`);
+    res.status(200).json(responsePayload);
+
+  } catch (error: any) {
+    console.error(`[Controller Error Request: ${uniqueRequestContext}]:`, error.message);
+    // Log the error that reached the controller catch block
+    await logRecallEvent('VERIFICATION_ERROR', { controllerError: error.message, stack: error.stack?.substring(0, 300) }, uniqueRequestContext);
+
+    // --- Prepare ERROR API Response Payload ---
+    const recallTraceOnError = await getTraceFromRecall(uniqueRequestContext); // Attempt to get trace even on error
+    const errorResponse: ApiVerifyResponse = {
+        answer: finalAnswer === "Processing..." ? "Failed to process request." : finalAnswer, // Show generated answer if available
+        status: verificationResult?.finalVerdict || 'Error: Verification Failed', // Show status if verifier ran partially
+        error: 'Verification process encountered an error.', // Generic error for frontend
+        details: error.message, // Specific error message
+        recallTrace: recallTraceOnError // Include trace up to failure point
+    };
+    res.status(500).json(errorResponse);
   }
 }

@@ -1,180 +1,174 @@
-import axios, { AxiosError, AxiosResponse } from 'axios';
-import config from '../config';
-import { KnowledgeFragment } from '../types';
-import { setTimeout } from 'timers/promises'; // Use promise-based setTimeout
+// kintask/packages/backend/src/services/filecoinService.ts
 
-// Use a reliable public IPFS gateway. Consider fallbacks or dedicated gateway for production.
-const IPFS_GATEWAY = 'https://w3s.link/ipfs/';
-const MAX_RETRIES = 3;
-const RETRY_DELAY_MS = 1000; // Start delay 1s
-const REQUEST_TIMEOUT = 25000; // 25 seconds timeout
+import axios, { AxiosError } from 'axios';
+import config from '../config'; // Import configuration to get gateway URL and index CID
+import { KnowledgeFragment } from '../types'; // Import the structure definition
 
-// Define structure expected in the index file uploaded to Filecoin
+// --- Configuration ---
+// Use the gateway specified in config, defaulting to a reliable public one (w3s.link)
+const IPFS_GATEWAY = config.ipfsGatewayUrl || 'https://w3s.link/ipfs/';
+const MAX_RETRIES = 3; // Number of retry attempts for failed fetches
+const RETRY_DELAY_MS = 800; // Initial delay before retrying (will increase exponentially)
+const REQUEST_TIMEOUT = 25000; // Timeout for each HTTP request in milliseconds (25 seconds)
+
+console.log(`[Filecoin Service] Using IPFS Gateway for retrieval: ${IPFS_GATEWAY}`);
+
+// Structure expected in the index file uploaded to Filecoin/Storacha
 interface IndexFileStructure {
     createdAt: string;
     description?: string;
-    fragmentsById?: Record<string, string>; // fragment_id -> cid map (optional but good)
-    index: Record<string, string[]>; // keyword -> [cid] map
+    fragmentsById?: Record<string, string>; // fragment_id -> cid map (optional)
+    index: Record<string, string[]>; // keyword -> [cid] map - Primary index used
+    indexRootCid?: string; // Optional: CID of the directory containing all fragments
 }
 
 // Simple in-memory cache with TTL (Time To Live) in milliseconds
 interface CacheEntry<T> {
     data: T;
-    timestamp: number;
-    cid: string; // Store CID for potential validation
+    timestamp: number; // When the data was cached
 }
-const cache = new Map<string, CacheEntry<any>>(); // Key is CID
-const CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes cache validity
-const MAX_CACHE_SIZE = 500; // Limit cache size
+const cache = new Map<string, CacheEntry<any>>();
+const CACHE_TTL_MS = 10 * 60 * 1000; // Cache validity duration (e.g., 10 minutes)
 
-// Utility to manage cache
-function setCache<T>(cid: string, data: T) {
-    if (!cid) return;
-    if (cache.size >= MAX_CACHE_SIZE) {
-        // Evict oldest entry if cache is full
-        const oldestKey = cache.keys().next().value;
-        if (oldestKey) cache.delete(oldestKey);
-        console.log(`[Cache] Evicted oldest entry: ${oldestKey?.substring(0,10)}...`);
-    }
-    cache.set(cid, { data, timestamp: Date.now(), cid });
-    // console.log(`[Cache] Set entry for CID: ${cid.substring(0,10)}...`);
+// --- Cache Utility Functions ---
+
+/**
+ * Stores data in the in-memory cache.
+ * @param key - The cache key (typically the CID).
+ * @param data - The data to store.
+ */
+function setCache<T>(key: string, data: T) {
+    if (!key) return; // Do not cache with empty key
+    cache.set(key, { data, timestamp: Date.now() });
+    // console.log(`[Cache] Set cache for key: ${key.substring(0,10)}...`);
 }
 
-function getCache<T>(cid: string): T | null {
-    if (!cid) return null;
-    const entry = cache.get(cid);
+/**
+ * Retrieves data from the cache if it exists and is not expired.
+ * @param key - The cache key (typically the CID).
+ * @returns The cached data or null if not found or expired.
+ */
+function getCache<T>(key: string): T | null {
+    if (!key) return null;
+    const entry = cache.get(key);
     if (entry && (Date.now() - entry.timestamp < CACHE_TTL_MS)) {
-        // console.log(`[Cache] Hit for CID: ${cid.substring(0,10)}...`);
+        // console.log(`[Cache] Hit for key: ${key.substring(0,10)}...`);
         return entry.data as T;
     }
-    if (entry) {
-        // console.log(`[Cache] Stale entry for CID: ${cid.substring(0,10)}...`);
-        cache.delete(cid); // Remove stale entry
-    }
+    // console.log(`[Cache] Miss or expired for key: ${key.substring(0,10)}...`);
+    cache.delete(key); // Remove expired or non-existent entry
     return null;
 }
 
-// Generic fetch function with retry logic
-async function fetchWithRetry<T>(url: string, cid: string): Promise<T | null> {
-    const cachedData = getCache<T>(cid);
+// --- Core Fetching Logic ---
+
+/**
+ * Fetches data from the configured IPFS gateway with caching and retry logic.
+ * @param url - The full URL to fetch from the gateway.
+ * @param cacheKey - The key to use for caching (typically the CID).
+ * @returns The fetched data (parsed as JSON if applicable) or null if fetch fails.
+ */
+async function fetchWithRetry<T>(url: string, cacheKey: string): Promise<T | null> {
+    // 1. Check Cache first
+    const cachedData = getCache<T>(cacheKey);
     if (cachedData) {
         return cachedData;
     }
 
-    console.log(`[Filecoin Service] Fetching CID ${cid.substring(0, 10)}... via ${url}`);
+    console.log(`[Filecoin Service] Fetching: ${url} (Cache Key: ${cacheKey.substring(0,10)}...)`);
+
+    // 2. Attempt Fetch with Retries
     for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
         try {
-            const response: AxiosResponse<T> = await axios.get<T>(url, {
+            const response = await axios.get<T>(url, {
                 timeout: REQUEST_TIMEOUT,
-                // Explicitly accept JSON, but be ready for gateway errors
-                headers: { 'Accept': 'application/json, */*' }
+                // Ensure correct headers for potentially receiving JSON
+                headers: {
+                    'Accept': 'application/json, application/octet-stream, */*',
+                    // 'User-Agent': 'KintaskBackend/1.0' // Optional: Identify your client
+                 }
              });
 
-            // Check for non-JSON responses that might indicate gateway errors or wrong content type
+            // Check content type for JSON if expecting it (primarily for fragments/index)
             const contentType = response.headers['content-type'];
-            if (!contentType || !contentType.toLowerCase().includes('application/json')) {
-                // Handle common gateway error pages (often HTML)
-                if (contentType?.toLowerCase().includes('text/html')) {
-                     console.warn(`[Filecoin Service] Attempt ${attempt} for ${cid}: Received HTML (likely gateway error page), status ${response.status}`);
-                } else {
-                     console.warn(`[Filecoin Service] Attempt ${attempt} for ${cid}: Received non-JSON content type: ${contentType}, status ${response.status}`);
-                }
-                 // Treat non-JSON as potentially retryable unless it's a definitive error like 404
-                 if (response.status === 404) {
-                     console.error(`[Filecoin Service] CID ${cid} not found (404) via gateway. Stopping retries.`);
-                     return null; // Explicitly return null for not found
-                 }
-                 // Throw an error to trigger retry logic for other non-JSON cases
-                 throw new Error(`Expected JSON, received ${contentType || 'unknown content type'}`);
-             }
+            const isJsonExpected = url.includes(config.knowledgeBaseIndexCid || 'INVALID_CID') || cacheKey !== config.knowledgeBaseIndexCid; // Assume fragments & index are JSON
 
-            // Handle successful JSON response
+            if (isJsonExpected && (!contentType || !contentType.includes('application/json'))) {
+                // Gateways sometimes return HTML error pages or non-JSON for DAG issues
+                console.warn(`[Filecoin Service] Attempt ${attempt} for ${cacheKey}: Expected JSON but received Content-Type: ${contentType}. Raw data sample:`, typeof response.data === 'string' ? response.data.substring(0, 100) + '...' : typeof response.data);
+                // Treat non-JSON response as an error for expected JSON content
+                 throw new Error(`Expected JSON content, but received ${contentType || 'unknown content type'}`);
+            }
+
+            // Check for successful status code
             if (response.status === 200 && response.data) {
-                console.log(`[Filecoin Service] Successfully fetched CID ${cid.substring(0, 10)}...`);
-                setCache(cid, response.data); // Cache successful fetch
-                // Add CID to the fetched object if it's an object and doesn't have it
-                if (typeof response.data === 'object' && response.data !== null && !(response.data as any).cid) {
-                    try {
-                         (response.data as any).cid = cid;
-                    } catch (e) { /* Object might be frozen, ignore */ }
-                }
+                console.log(`[Filecoin Service] Successfully fetched ${cacheKey.substring(0,10)}... (Attempt ${attempt})`);
+                setCache(cacheKey, response.data); // Cache the successful response
                 return response.data;
             } else {
-                // Log unexpected success status codes if they have JSON bodies
-                console.warn(`[Filecoin Service] Fetch attempt ${attempt} for ${cid} returned unexpected JSON status: ${response.status}`);
-                // Throw to retry unless it's a status code that shouldn't be retried (e.g., 4xx client errors other than 404 handled above)
-                if (response.status >= 400 && response.status < 500) {
-                     console.error(`[Filecoin Service] Client error status ${response.status} for ${cid}. Stopping retries.`);
-                     return null;
-                }
-                 throw new Error(`Unexpected status code ${response.status}`);
+                // Log unexpected success status codes (e.g., 204 No Content?)
+                console.warn(`[Filecoin Service] Fetch attempt ${attempt} for ${cacheKey} returned unexpected status: ${response.status}`);
+                // Continue to retry loop
             }
 
         } catch (error: any) {
             const axiosError = error as AxiosError;
-            let shouldRetry = true;
-            let errorMsg = axiosError.message;
+            console.warn(`[Filecoin Service] Error fetch attempt ${attempt}/${MAX_RETRIES} for ${cacheKey}:`, axiosError.message);
 
+            // Log details from the error response if available
             if (axiosError.response) {
-                // Got a response from the server, but it's an error status code
-                errorMsg = `Gateway Response Status: ${axiosError.response.status} for CID ${cid.substring(0, 10)}`;
-                console.warn(`[Filecoin Service] Attempt ${attempt} failed: ${errorMsg}`);
-                 // Stop retrying on 404 Not Found specifically
-                if (axiosError.response.status === 404) {
-                     console.error(`[Filecoin Service] CID ${cid} not found on gateway (404). Stopping retries.`);
-                     shouldRetry = false;
-                     return null; // Explicitly return null for not found
-                }
-                // Consider stopping on other 4xx errors too? Maybe allow retry for rate limits (429)?
-                if (axiosError.response.status >= 400 && axiosError.response.status < 500 && axiosError.response.status !== 429) {
-                    console.error(`[Filecoin Service] Client error ${axiosError.response.status} for ${cid}. Stopping retries.`);
-                    shouldRetry = false;
-                    return null; // Return null for client errors other than rate limits
-                }
-            } else if (axiosError.request) {
-                // Request was made but no response received (timeout, network error)
-                errorMsg = `Network error or timeout for CID ${cid.substring(0, 10)}`;
-                console.warn(`[Filecoin Service] Attempt ${attempt} failed: ${errorMsg}. (${axiosError.code || 'No Code'})`);
-                // Generally retry network errors/timeouts
-            } else {
-                // Setup error or other issue
-                errorMsg = `Error setting up request for CID ${cid.substring(0, 10)}`;
-                console.warn(`[Filecoin Service] Attempt ${attempt} failed: ${errorMsg}: ${axiosError.message}`);
-                shouldRetry = false; // Don't retry setup errors
+                 console.warn(`  Gateway Response Status: ${axiosError.response.status}`);
+                 // console.warn(`  Gateway Response Headers:`, axiosError.response.headers); // Can be verbose
+                 // console.warn(`  Gateway Response Data:`, axiosError.response.data); // Can be verbose/large
+
+                 // Don't retry on 404 Not Found - the content likely doesn't exist
+                 if (axiosError.response.status === 404) {
+                      console.error(`[Filecoin Service] CID ${cacheKey} not found on gateway (404). Stopping retries.`);
+                      return null; // Indicate definitively not found
+                 }
+                 // Consider stopping retries on other client errors (4xx) too?
+            } else if (axiosError.code === 'ECONNABORTED' || axiosError.message.includes('timeout')) {
+                console.warn(`  Gateway request timed out.`);
+            }
+
+            // If it's the last attempt, log final failure and return null
+            if (attempt === MAX_RETRIES) {
+                console.error(`[Filecoin Service] Final fetch attempt failed for CID: ${cacheKey} after ${MAX_RETRIES} tries.`);
                 return null;
             }
 
-            if (attempt === MAX_RETRIES || !shouldRetry) {
-                console.error(`[Filecoin Service] Final fetch attempt failed for CID: ${cid}. Error: ${errorMsg}`);
-                return null; // Return null after final attempt or if retry is disallowed
-            }
-
-            // Implement exponential backoff
-            const delay = RETRY_DELAY_MS * Math.pow(2, attempt - 1);
-            console.log(`   Retrying CID ${cid.substring(0, 10)} in ${delay}ms...`);
-            await setTimeout(delay); // Use promise-based timeout
+            // Wait before retrying with exponential backoff
+            const delay = RETRY_DELAY_MS * Math.pow(2, attempt - 1); // 1s, 2s, 4s...
+            console.log(`  Retrying in ${delay}ms...`);
+            await new Promise(resolve => setTimeout(resolve, delay));
         }
     }
-    // Should only be reached if all retries fail in an unexpected way
-    console.error(`[Filecoin Service] Fetch failed for CID ${cid} after all retries.`);
+
+    // Should not be reached if error handling above is correct, but acts as a fallback
+    console.error(`[Filecoin Service] Fetch failed unexpectedly for ${cacheKey} after all attempts.`);
     return null;
 }
 
-// --- Public Service Functions ---
+// --- Exported Service Functions ---
 
-// Fetches the index file containing keyword-to-CID mappings
+/**
+ * Fetches and parses the Knowledge Graph index file from Filecoin/IPFS.
+ * @returns The keyword-to-CID index object, or null if fetching fails.
+ */
 export async function getKnowledgeIndex(): Promise<IndexFileStructure['index'] | null> {
     const indexCid = config.knowledgeBaseIndexCid;
-    if (!indexCid || indexCid === 'PASTE_INDEX_CID_HERE') {
-        console.error('[Filecoin Service] KB_INDEX_CID is not configured or is placeholder in backend .env.');
+    if (!indexCid) {
+        console.error('[Filecoin Service] FATAL ERROR: KB_INDEX_CID is not configured in backend .env.');
         return null;
     }
 
     const url = `${IPFS_GATEWAY}${indexCid}`;
-    const indexFile = await fetchWithRetry<IndexFileStructure>(url, indexCid); // Use index CID
+    console.log(`[Filecoin Service] Getting Knowledge Index (CID: ${indexCid.substring(0,10)}...)`);
+    const indexFile = await fetchWithRetry<IndexFileStructure>(url, indexCid); // Use index CID as cache key
 
     if (indexFile && typeof indexFile.index === 'object' && indexFile.index !== null) {
-         console.log(`[Filecoin Service] Knowledge index loaded successfully (${Object.keys(indexFile.index).length} keywords).`);
+         // Optional: Log how many keywords are in the loaded index
+         console.log(`[Filecoin Service] Successfully loaded index with ${Object.keys(indexFile.index).length} keywords.`);
          return indexFile.index;
     } else {
          console.error(`[Filecoin Service] Failed to fetch or parse index file structure from CID: ${indexCid}`);
@@ -182,27 +176,33 @@ export async function getKnowledgeIndex(): Promise<IndexFileStructure['index'] |
     }
 }
 
-// Fetches a single knowledge fragment JSON object using its CID
+/**
+ * Fetches and parses a single Knowledge Fragment JSON object from Filecoin/IPFS using its CID.
+ * @param cid - The Content Identifier (CID) of the fragment to fetch.
+ * @returns The parsed KnowledgeFragment object, or null if fetching or parsing fails.
+ */
 export async function fetchKnowledgeFragment(cid: string): Promise<KnowledgeFragment | null> {
-    // Basic CID format validation (improve if needed for different CID versions)
-    if (!cid || typeof cid !== 'string' || !cid.match(/^(Qm[a-zA-Z0-9]{44}|bafy[a-zA-Z0-9]{55})$/)) {
+    // Basic CID format validation
+    if (!cid || typeof cid !== 'string' || (!cid.startsWith('bafy') && !cid.startsWith('Qm'))) {
         console.error(`[Filecoin Service] Invalid CID format provided for fragment fetch: ${cid}`);
         return null;
     }
 
     const url = `${IPFS_GATEWAY}${cid}`;
+    // Use fragment CID as the cache key
     const fragment = await fetchWithRetry<KnowledgeFragment>(url, cid);
 
-    // Optional: Validate fetched fragment against KnowledgeFragment interface/schema
-    if (fragment) {
-        if (typeof fragment.fragment_id !== 'string' || typeof fragment.type !== 'string' || typeof fragment.content !== 'object' || typeof fragment.provenance !== 'object') {
-             console.warn(`[Filecoin Service] Fetched fragment ${cid} has missing/invalid core fields.`);
-             // Decide whether to return potentially invalid data or null
-             // return null;
-        }
-         // Add CID if fetchWithRetry didn't already
-        if (!fragment.cid) fragment.cid = cid;
-    }
+    // Optional: Add schema validation here after fetching if needed
+    // if (fragment && !isValidKnowledgeFragment(fragment)) {
+    //     console.error(`[Filecoin Service] Fetched data for CID ${cid} is not a valid KnowledgeFragment.`);
+    //     return null;
+    // }
 
     return fragment;
+}
+
+// Optional: Add a function to clear the cache if needed for debugging
+export function clearFilecoinCache() {
+    console.log("[Filecoin Service] Clearing in-memory cache.");
+    cache.clear();
 }

@@ -1,20 +1,26 @@
+// kintask/packages/backend/tsconfig.json
 {
   "compilerOptions": {
-    "target": "ES2020",
-    "module": "CommonJS",
+    "target": "ES2022",        // Use a target that supports modern features like top-level await
+    "module": "NodeNext",     // <--- CHANGE: Use NodeNext module system
     "outDir": "./dist",
     "rootDir": "./src",
     "strict": true,
-    "esModuleInterop": true,
+    "esModuleInterop": true,    // Keep enabled, generally helpful
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
-    "moduleResolution": "node",
+    "moduleResolution": "NodeNext", // <--- CHANGE: Use NodeNext resolution
     "sourceMap": true,
     "baseUrl": "./",
     "paths": {
       "@/*": ["src/*"]
     }
+    // Ensure no "types" array limiting type lookups if present
+  },
+  "ts-node": { // Add ts-node config if using it directly (ts-node-dev uses it)
+    "esm": true, // Tell ts-node to handle ESM potential
+    "experimentalSpecifierResolution": "node" // May help resolution
   },
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist"]

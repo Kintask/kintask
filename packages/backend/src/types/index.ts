@@ -21,7 +21,6 @@ export interface ExternalAttestation {
 
 export interface KnowledgeFragment {
   fragment_id: string; // Unique identifier for this version
-  cid?: string; // Adding CID field, potentially populated after fetch/upload
   type: string; // e.g., 'factual_statement', 'rule', 'definition'
   keywords?: string[]; // For indexing
   content: Record<string, any>; // The actual data/fact/rule
@@ -64,7 +63,8 @@ export type RecallEventType =
     | 'FINAL_VERDICT_CALCULATED' // Log verdict before reveal check
     | 'TIMELOCK_REVEAL_RECEIVED' // Log revealed verdict, check match
     | 'VERIFICATION_COMPLETE'
-    | 'VERIFICATION_ERROR';
+    | 'VERIFICATION_ERROR'
+    | 'GENERATOR_MOCK_USED'; // Added for mock logging
 
 // Structure for data field in Recall log entries
 export interface RecallLogEntryData {

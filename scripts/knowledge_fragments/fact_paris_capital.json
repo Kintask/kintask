@@ -1,0 +1,30 @@
+{
+  "fragment_id": "fact_paris_capital_v1",
+  "type": "factual_statement",
+  "keywords": ["paris", "capital", "france", "city", "europe"],
+  "content": {
+    "subject": "Paris",
+    "predicate": "isCapitalOf",
+    "object": "France"
+  },
+  "provenance": {
+    "source_type": "dataset_snapshot",
+    "source_name": "CuratedFactsDB_2024_Q1",
+    "source_cid": "bafy...",
+    "curation_method": "expert_review",
+    "curator_id": "did:ethr:0x123...",
+    "timestamp_created": "2024-04-01T12:00:00Z",
+    "confidence_score": 0.99,
+    "external_attestations": [
+      {
+        "chain": "BaseSepolia",
+        "type": "EAS",
+        "schema_uid": "0xSCHEMA_UID_PLACEHOLDER...",
+        "attestation_uid": "0xEAS_UID_PLACEHOLDER...",
+        "attestation_data": { "notes": "Verified by GeoExperts DAO - Q1 2024" }
+      }
+    ]
+  },
+  "version": 1,
+  "previous_version_cid": null
+}
