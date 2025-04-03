@@ -100,6 +100,11 @@ function App() {
         <header className="mb-4 text-center shrink-0">
              {/* Optional: Add Logo component */}
             {/* <img src="/kintask-logo.svg" alt="Kintask Logo" className="h-10 w-auto mx-auto mb-1" /> */}
+            <img
+                src="https://cdn.discordapp.com/attachments/1356707592478392634/1357070814238867628/ComfyUI_01572_.png?ex=67eede2f&is=67ed8caf&hm=3c955398d4b755edb02ea082206156f147c2cd6a1481d9d8b9fa5042db54c5eb&format=webp&quality=lossless&width=556&height=715"
+                alt="Illustration of interconnected nodes representing AI and trust" //  ***REPLACE WITH ACTUAL DESCRIPTION!***
+                className="h-16 md:h-20 w-auto mx-auto mb-2 rounded-lg shadow-md"
+            />            
             <h1 className="text-3xl md:text-4xl font-bold text-kintask-blue dark:text-kintask-blue-light tracking-tight">
                 {import.meta.env.VITE_APP_TITLE || 'Kintask'}
             </h1>
