@@ -1,73 +1,87 @@
-import { ethers, Wallet, Contract, AbiCoder, keccak256, getBytes, TransactionResponse, TransactionReceipt, Log, EventLog } from 'ethers';
+// ./src/services/timelockService.ts
+import { ethers, Wallet, Contract, utils, providers, BigNumber, Event } from 'ethers'; // Use v5 imports
 import { Blocklock, SolidityEncoder, encodeCiphertextToSolidity, TypesLib } from 'blocklock-js';
 import config from '../config';
-import KintaskCommitmentAbi from '../contracts/abi/KintaskCommitment.json'; // Load the ABI
+// @ts-ignore - Assume JSON ABI is correct
+import KintaskCommitmentAbi from '../contracts/abi/KintaskCommitment.json';
 import { KINTASK_COMMITMENT_CONTRACT_ADDRESS } from '../contracts/addresses';
 import { logRecallEvent } from './recallService'; // Import recall logger for reveal events
 
 interface CommitResult {
-    requestId: string; // The on-chain request ID from Blocklock
-    txHash: string; // The L2 transaction hash
-    ciphertextHash: string; // Hash of the encrypted data 'v' field
+    requestId: string;
+    txHash: string;
+    ciphertextHash: string;
 }
 
 // --- Initialization ---
-let provider: ethers.JsonRpcProvider | null = null;
+let provider: providers.StaticJsonRpcProvider | null = null;
 let wallet: Wallet | null = null;
 let blocklockJsInstance: Blocklock | null = null;
 let commitmentContract: Contract | null = null;
 let isTimelockInitialized = false;
 let revealListenerAttached = false;
-// Simple mapping to associate blocklock request ID with our internal request context for logging reveals
 const blocklockIdToRequestContext = new Map<string, string>();
-const MAX_CONTEXT_MAP_SIZE = 1000; // Prevent memory leak
+const MAX_CONTEXT_MAP_SIZE = 1000;
 
 // Function to initialize (or re-initialize) the service
-// Returns true if initialization is complete or already done, false if required config is missing
 function initializeTimelockService(): boolean {
-    if (isTimelockInitialized) return true; // Already initialized
+    if (isTimelockInitialized) return true;
     console.log("[Timelock Service] Initializing...");
     try {
-        // Validate critical config FIRST
-         if (!config.l2RpcUrl || !config.walletPrivateKey || !config.blocklockSenderProxyAddress || !KINTASK_COMMITMENT_CONTRACT_ADDRESS) {
-             console.warn("[Timelock Service] Skipping initialization: Missing required L2/Blocklock/Contract configuration in .env");
-             return false; // Cannot initialize
+        if (!config.l2RpcUrl || !config.walletPrivateKey || !config.blocklockSenderProxyAddress || !KINTASK_COMMITMENT_CONTRACT_ADDRESS) {
+             console.warn("[Timelock Service] Skipping initialization: Missing required config.");
+             return false;
          }
-         // Validate ABI presence
+          // @ts-ignore
           if (!KintaskCommitmentAbi.abi || KintaskCommitmentAbi.abi.length === 0) {
-               console.error("[Timelock Service] FATAL ERROR: KintaskCommitment ABI not found or empty. Run 'pnpm contracts:compile' and copy ABI.");
-               return false; // Cannot initialize without ABI
+               console.error("[Timelock Service] FATAL ERROR: KintaskCommitment ABI missing.");
+               return false;
           }
 
-        provider = new ethers.JsonRpcProvider(config.l2RpcUrl);
+        provider = new providers.StaticJsonRpcProvider(config.l2RpcUrl);
         wallet = new Wallet(config.walletPrivateKey, provider);
-        blocklockJsInstance = new Blocklock(wallet, config.blocklockSenderProxyAddress);
-        commitmentContract = new Contract(KINTASK_COMMITMENT_CONTRACT_ADDRESS, KintaskCommitmentAbi.abi, wallet);
 
-        // Perform async checks AFTER basic setup
-         Promise.all([
-             provider.getNetwork(),
-             commitmentContract.getAddress() // Check if contract connection works
-         ]).then(([network, address]) => {
-             console.log(`[Timelock Service] Connected to network: ${network.name} (Chain ID: ${network.chainId})`);
-             console.log(`[Timelock Service] KintaskCommitment contract instance connected at: ${address}`);
-             isTimelockInitialized = true; // Mark as fully initialized only after checks pass
-             console.log("[Timelock Service] Initialization complete.");
-             // Attempt to start listener only after successful init
-              startRevealListener(); // Start listener now that we are initialized
-         }).catch(err => {
-             console.error("[Timelock Service] Post-initialization check failed (Network or Contract connection issue):", err.message);
-             // Keep isTimelockInitialized = false if checks fail
-             isTimelockInitialized = false;
-         });
+        import('blocklock-js').then(BlocklockModule => {
+            blocklockJsInstance = new BlocklockModule.Blocklock(wallet!, config.blocklockSenderProxyAddress!);
+             // @ts-ignore
+             commitmentContract = new Contract(KINTASK_COMMITMENT_CONTRACT_ADDRESS!, KintaskCommitmentAbi.abi, wallet);
 
-         console.log("[Timelock Service] Initialization sequence started (async checks pending)...");
-         return true; // Return true indicating initialization started
+             Promise.all([
+                 provider!.getNetwork(),
+                 // --- FIX: Use contract.address property (ethers v5) ---
+                 Promise.resolve(commitmentContract.address) // Resolve address property
+                 // --- END FIX ---
+             ]).then(async ([network, address]) => { // Mark async to await getBlockNumber
+                 console.log(`[Timelock Service] Connected to network: ${network.name} (Chain ID: ${network.chainId})`);
+                 console.log(`[Timelock Service] Contract instance connected at: ${address}`); // address is now directly the string
+                 try {
+                    // Initialize lastPolledBlock - this part remains the same
+                    // @ts-ignore TODO: Remove polling or fix getBlockNumber call if needed
+                    // lastPolledBlock = await provider!.getBlockNumber();
+                    // console.log(`[Timelock Service] Initial polling block set to: ${lastPolledBlock}`);
+                    isTimelockInitialized = true;
+                    console.log("[Timelock Service] Initialization complete.");
+                    startRevealListener(); // Start listener
+                } catch (blockNumError: any) {
+                    console.error("[Timelock Service] Failed to get initial block number:", blockNumError.message);
+                    isTimelockInitialized = false;
+                }
+             }).catch(err => {
+                 console.error("[Timelock Service] Post-init check failed:", err.message);
+                 isTimelockInitialized = false;
+             });
+        }).catch(importError => {
+            console.error("[Timelock Service] FATAL: Failed to import blocklock-js:", importError);
+            isTimelockInitialized = false;
+        });
+
+         console.log("[Timelock Service] Initialization sequence started...");
+         return true;
 
     } catch (error: any) {
          console.error("[Timelock Service] FATAL Initialization failed:", error.message);
          isTimelockInitialized = false;
-         return false; // Indicate failure
+         return false;
     }
 }
 
@@ -77,105 +91,127 @@ initializeTimelockService();
 // --- Commit Function ---
 export async function commitVerdictTimelocked(
     verdict: string,
-    delayInBlocks: number = 5, // Default delay
-    requestContext?: string // Pass context for mapping reveal logs
+    delayInBlocks: number = 5,
+    requestContext?: string
 ): Promise<CommitResult | null> {
 
-    // Check initialization status before proceeding
     if (!isTimelockInitialized || !blocklockJsInstance || !commitmentContract || !provider || !wallet) {
         console.error('[Timelock Service] Service not initialized or ready. Cannot commit verdict.');
-        return null; // Fail if not ready
+        return null;
     }
 
-    let txResponse: TransactionResponse | null = null; // Define txResponse outside try
-    const logContext = requestContext || 'unknownContext'; // Use provided context or a default
+    let txResponse: providers.TransactionResponse | null = null;
+    const logContext = requestContext || 'unknownContext';
 
     try {
         const currentBlockNumber = await provider.getBlockNumber();
-        const decryptionBlockNumber = BigInt(currentBlockNumber + delayInBlocks);
-        console.log(`[Timelock Service Context: ${logContext}] Current Block: ${currentBlockNumber}, Decryption Block Target: ${decryptionBlockNumber}`);
+        const decryptionBlockNumber = BigNumber.from(currentBlockNumber + delayInBlocks);
+        console.log(`[Timelock Service Context: ${logContext}] Current Block: ${currentBlockNumber}, Decryption Block Target: ${decryptionBlockNumber.toString()}`);
 
-        // 1. Encode verdict string
-        const encoder = AbiCoder.defaultAbiCoder();
+        const encoder = utils.defaultAbiCoder;
         const encodedVerdict = encoder.encode(['string'], [verdict]);
-        const encodedVerdictBytes = getBytes(encodedVerdict);
+        const encodedVerdictBytes = utils.arrayify(encodedVerdict);
 
-        // 2. Encrypt using blocklock-js
         console.log(`[Timelock Service Context: ${logContext}] Encrypting verdict "${verdict}"`);
-        const ciphertext: TypesLib.Ciphertext = blocklockJsInstance.encrypt(encodedVerdictBytes, decryptionBlockNumber);
+        const ciphertext: TypesLib.Ciphertext = blocklockJsInstance.encrypt(encodedVerdictBytes, BigInt(currentBlockNumber + delayInBlocks));
+
+        const { encodeCiphertextToSolidity } = await import('blocklock-js');
         const solidityCiphertext = encodeCiphertextToSolidity(ciphertext);
-        const ciphertextHash = keccak256(solidityCiphertext.v); // Hash the encrypted part V
+        const ciphertextHash = utils.keccak256(solidityCiphertext.v);
         console.log(`[Timelock Service Context: ${logContext}] Ciphertext Hash: ${ciphertextHash}`);
 
-        // 3. Call commitVerdict on contract
-        console.log(`[Timelock Service Context: ${logContext}] Sending commitVerdict transaction to ${await commitmentContract.getAddress()}...`);
+        // --- FIX: Use contract.address property (ethers v5) ---
+        const contractAddress = commitmentContract.address;
+        console.log(`[Timelock Service Context: ${logContext}] Sending commitVerdict transaction to ${contractAddress}...`);
+        // --- END FIX ---
+
+        // Optional Gas Estimation (v5 uses estimateGas property on the function)
+        let estimatedGas: BigNumber | undefined;
+        try {
+            estimatedGas = await commitmentContract.estimateGas.commitVerdict(
+                 decryptionBlockNumber,
+                 solidityCiphertext
+            );
+            console.log(`[Timelock Service DEBUG] Estimated Gas: ${estimatedGas.toString()}`);
+        } catch (simError: any) {
+            let reason = simError.reason || simError.message;
+             // v5 error data might be different, simpler check
+             if (simError.error?.data?.message) { reason = simError.error.data.message; }
+            console.error(`[Timelock Service DEBUG] Gas estimation/simulation FAILED: ${reason}`);
+            throw new Error(`Transaction simulation/estimation failed: ${reason}`);
+        }
+
         txResponse = await commitmentContract.commitVerdict(
             decryptionBlockNumber,
-            solidityCiphertext
-            // Optional: Add gas estimation/limit
-            // { gasLimit: 300000 } // Example fixed gas limit
+            solidityCiphertext,
+            // Apply gas limit bump if estimation worked
+            { gasLimit: estimatedGas ? estimatedGas.mul(120).div(100) : undefined }
         );
+
+        if (!txResponse) {
+            throw new Error("commitVerdict call returned null response.");
+        }
+
         console.log(`[Timelock Service Context: ${logContext}] Commit transaction sent. Hash: ${txResponse.hash}`);
         console.log(`[Timelock Service Context: ${logContext}] Waiting for confirmation (1 block)...`);
-        const receipt: TransactionReceipt | null = await txResponse.wait(1);
+        const receipt: providers.TransactionReceipt | null = await txResponse.wait(1);
 
-        if (!receipt) throw new Error(`Commit transaction ${txResponse.hash} confirmation timed out or receipt was null.`);
+        if (!receipt) {
+             throw new Error(`Commit transaction ${txResponse?.hash ?? 'unknown'} confirmation timed out or receipt was null.`);
+         }
+
         console.log(`[Timelock Service Context: ${logContext}] Commit Tx Confirmed. Status: ${receipt.status}, Block: ${receipt.blockNumber}`);
-        if (receipt.status !== 1) throw new Error(`Commit transaction ${txResponse.hash} failed on-chain (Status: 0). Check explorer.`);
+        if (receipt.status !== 1) {
+            throw new Error(`Commit transaction ${txResponse?.hash ?? 'unknown'} failed on-chain (Status: 0). Check explorer.`);
+        }
 
-        // 4. Parse Blocklock Request ID from logs emitted by *our* contract
-        const eventInterface = commitmentContract.interface.getEvent('VerdictCommitted');
-        const eventTopic = eventInterface.topicHash;
-        const receiptLogs = receipt.logs || []; // Ensure logs is an array
-        const log = receiptLogs.find((l: Log) =>
+        const eventInterface = commitmentContract.interface;
+        const eventSignature = 'VerdictCommitted(uint256,address,uint256,bytes32)';
+        const eventTopic = eventInterface.getEventTopic(eventSignature);
+        const receiptLogs = receipt.logs || [];
+        const log = receiptLogs.find((l) =>
             l.topics[0] === eventTopic &&
-            l.address.toLowerCase() === KINTASK_COMMITMENT_CONTRACT_ADDRESS.toLowerCase()
+            l.address.toLowerCase() === KINTASK_COMMITMENT_CONTRACT_ADDRESS!.toLowerCase()
         );
 
-        if (!log) throw new Error(`Could not find VerdictCommitted event log in transaction receipt for ${txResponse.hash}.`);
-
-        const decodedLog = commitmentContract.interface.parseLog({ topics: [...log.topics], data: log.data });
+        if (!log) {
+            throw new Error(`Could not find VerdictCommitted event log in transaction receipt for ${txResponse?.hash ?? 'unknown'}.`);
+        }
+        const decodedLog = eventInterface.parseLog(log);
         const blocklockRequestId = decodedLog?.args.blocklockRequestId?.toString();
         if (!blocklockRequestId) throw new Error('Failed to decode Blocklock Request ID from VerdictCommitted event.');
-
         console.log(`[Timelock Service Context: ${logContext}] Successfully committed. Blocklock Request ID: ${blocklockRequestId}`);
 
-        // Store mapping for the listener
         if (requestContext) {
             if (blocklockIdToRequestContext.size >= MAX_CONTEXT_MAP_SIZE) {
                 const oldestKey = blocklockIdToRequestContext.keys().next().value;
-                 blocklockIdToRequestContext.delete(oldestKey);
-                 console.warn(`[Timelock Service] Context map size limit reached, removed oldest entry: ${oldestKey}`);
+                if (oldestKey !== undefined) {
+                    blocklockIdToRequestContext.delete(oldestKey);
+                    console.warn(`[Timelock Service] Context map size limit reached, removed oldest entry: ${oldestKey}`);
+                }
             }
             blocklockIdToRequestContext.set(blocklockRequestId, requestContext);
             console.log(`[Timelock Service] Mapped Blocklock ID ${blocklockRequestId} to Context ${requestContext}`);
-        } else {
-             console.warn("[Timelock Service] Request context not provided for mapping reveal listener.");
-        }
+        } else { console.warn("[Timelock Service] Request context not provided for mapping reveal listener."); }
 
         return {
             requestId: blocklockRequestId,
-            txHash: txResponse.hash,
+            txHash: txResponse?.hash ?? 'unknown_hash',
             ciphertextHash: ciphertextHash
         };
 
     } catch (error: any) {
         console.error(`[Timelock Service Error Context: ${logContext}] Error during commit:`, error.message);
         if (txResponse?.hash) console.error(`[Timelock Service] Failing Transaction Hash: ${txResponse.hash}`);
-        return null; // Indicate failure
+        return null;
     }
 }
 
 // --- Reveal Listener ---
 export function startRevealListener() {
-    if (revealListenerAttached) {
-        // console.log("[Timelock Service] Reveal listener already attached.");
-        return;
-    }
-     // Ensure initialized before attaching listener
+    if (revealListenerAttached) { return; }
      if (!isTimelockInitialized || !commitmentContract) {
          console.warn("[Timelock Service] Cannot start listener, service not fully initialized yet.");
-         // Initialization might still be in async checks, listener will start when/if init completes.
          return;
      }
 
@@ -183,52 +219,38 @@ export function startRevealListener() {
     try {
         const eventFilter = commitmentContract.filters.VerdictRevealed();
 
-         // Using commitmentContract.on() sets up a persistent listener
-         commitmentContract.on(eventFilter, async (requestIdBigInt, requester, revealedVerdictBytes, eventLog) => {
-            // Type assertion for ethers v6 EventLog
-            const log = eventLog as unknown as EventLog;
-            const blocklockRequestId = requestIdBigInt.toString();
-            const txHash = log.transactionHash; // Tx hash where the Blocklock callback happened
+         commitmentContract.on(eventFilter, async (requestIdBigNumber, requester, revealedVerdictBytes, event: Event) => {
+            const blocklockRequestId = requestIdBigNumber.toString();
+            const txHash = event.transactionHash;
 
             console.log(`\n[Timelock Listener] === Received VerdictRevealed Event ===`);
             console.log(`  Blocklock Request ID: ${blocklockRequestId}`);
-            console.log(`  Event Source Tx Hash: ${txHash}`); // This is the Blocklock callback tx hash
+            console.log(`  Event Source Tx Hash: ${txHash}`);
 
-             // Find the original request context using the mapping
              const requestContext = blocklockIdToRequestContext.get(blocklockRequestId);
              if (!requestContext) {
-                 console.warn(`[Timelock Listener] Could not find request context for revealed Blocklock ID: ${blocklockRequestId}. Cannot log details to Recall.`);
-                 // It's possible the context map was cleared or this ID was processed already
+                 console.warn(`[Timelock Listener] Could not find request context for revealed Blocklock ID: ${blocklockRequestId}.`);
                  return;
              }
              console.log(`  Associated Request Context: ${requestContext}`);
-
-             // Clean up the mapping immediately to prevent reprocessing
              blocklockIdToRequestContext.delete(blocklockRequestId);
 
              try {
-                // Decode the revealed verdict bytes (assuming it was encoded as a string)
-                const encoder = AbiCoder.defaultAbiCoder();
+                const encoder = utils.defaultAbiCoder;
                 const [revealedVerdict] = encoder.decode(['string'], revealedVerdictBytes);
-
                 console.log(`[Timelock Listener] Decoded Verdict for context ${requestContext}: "${revealedVerdict}"`);
 
-                // Log this reveal event to Recall Service under the original request context
                 await logRecallEvent(
                     'TIMELOCK_REVEAL_RECEIVED',
                     { blocklockRequestId, revealedVerdict, sourceTxHash: txHash, requester },
                     requestContext
                 );
                 console.log(`[Timelock Listener] Logged TIMELOCK_REVEAL_RECEIVED to Recall for context ${requestContext}`);
-
-                // TODO: Compare revealedVerdict with final calculated verdict from verifierService state?
-
              } catch(decodeError: any) {
                 console.error(`[Timelock Listener] Error decoding revealed verdict for ID ${blocklockRequestId}, Context ${requestContext}:`, decodeError.message);
-                // Log decode error to recall
                  await logRecallEvent(
                     'VERIFICATION_ERROR',
-                    { stage: 'TimelockRevealDecode', error: decodeError.message, blocklockRequestId, rawBytes: ethers.hexlify(revealedVerdictBytes) },
+                    { stage: 'TimelockRevealDecode', error: decodeError.message, blocklockRequestId, rawBytes: utils.hexlify(revealedVerdictBytes) },
                     requestContext
                 );
              }
@@ -243,21 +265,17 @@ export function startRevealListener() {
     }
 }
 
-// Function to stop listener (e.g., on shutdown)
+// Function to stop listener
 export function stopRevealListener() {
      if (revealListenerAttached && commitmentContract) {
          console.log("[Timelock Service] Removing VerdictRevealed listener...");
          try {
-             // Use off() or removeAllListeners() depending on specific needs and ethers version guarantees
-             commitmentContract.off("VerdictRevealed"); // Attempt to remove specific listener type
-             // Alternatively: commitmentContract.removeAllListeners("VerdictRevealed");
+             commitmentContract.removeAllListeners("VerdictRevealed");
              revealListenerAttached = false;
              console.log("[Timelock Service] Listener removed.");
          } catch (error: any) {
              console.error("[Timelock Service] Error removing listener:", error.message);
              revealListenerAttached = false;
          }
-     } else {
-          // console.log("[Timelock Service] Listener not attached or contract not initialized.");
      }
 }

@@ -13,6 +13,7 @@
     "kg:upload": "pnpm --filter kintask-scripts upload"
   },
   "devDependencies": {
+    "@web-std/file": "^3.0.3",
     "hardhat": "^2.22.19",
     "typescript": "^5.8.2"
   },

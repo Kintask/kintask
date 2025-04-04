@@ -5,10 +5,10 @@
   "devDependencies": {
     "@nomicfoundation/hardhat-chai-matchers": "^2.0.0",
     "@nomicfoundation/hardhat-ethers": "^3.0.0",
+    "@nomicfoundation/hardhat-ignition-ethers": "^0.15.4",
     "@nomicfoundation/hardhat-network-helpers": "^1.0.0",
     "@nomicfoundation/hardhat-toolbox": "^5.0.0",
     "@nomicfoundation/hardhat-verify": "^2.0.6",
-    "@nomicfoundation/hardhat-ignition-ethers": "^0.15.4",
     "@typechain/ethers-v6": "^0.5.0",
     "@typechain/hardhat": "^9.0.0",
     "@types/chai": "^4.2.0",
@@ -25,7 +25,10 @@
     "typescript": ">=4.5.0"
   },
   "dependencies": {
-    "blocklock-solidity": "latest"
+    "@ensdomains/buffer": "^0.1.1",
+    "@zondax/filecoin-solidity": "^4.0.3",
+    "blocklock-solidity": "latest",
+    "solidity-cborutils": "^2.0.0"
   },
   "scripts": {
     "compile": "hardhat compile",

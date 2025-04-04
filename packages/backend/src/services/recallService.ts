@@ -1,314 +1,558 @@
-// recall.service.ts
+// services/recallService.ts
+
 import config from '../config';
-import { RecallLogEntryData, RecallEventType } from '../types';
-import { testnet } from '@recallnet/chains'; // Use the testnet chain definition
-import { createWalletClient, http, parseEther, WalletClient, PublicClient, createPublicClient, ChainMismatchError } from 'viem';
+import {
+  RecallLogEntryData,
+  RecallEventType,
+  VerificationResultInternal,
+} from '../types';
+import { testnet } from '@recallnet/chains';
+import {
+  createWalletClient,
+  http,
+  parseEther,
+  WalletClient,
+  PublicClient,
+  createPublicClient,
+  BaseError,
+  formatEther,
+  Address,
+} from 'viem';
 import { privateKeyToAccount, Account } from 'viem/accounts';
-// Assuming named exports based on example structure
-import { RecallClient } from '@recallnet/sdk/client'; // Removed BucketManager import
+import { truncateText } from '../utils';
 
-// --- Module State ---
-let recallClientInstance: RecallClient | null = null;
+/** 
+ * DYNAMIC IMPORT: We'll load { RecallClient } at runtime. 
+ * This helps in certain Node environments that don't allow ESM imports.
+ */
+async function loadRecallClientModule() {
+  const mod = await import('@recallnet/sdk/client');
+  return mod.RecallClient;
+}
+
+// ---------------- Module-Level State ----------------
+let recallClientInstance: any = null;
 let isRecallInitialized = false;
-let logBucketAddress = config.recallLogBucket || null; // Store the bucket address globally
+let initPromise: Promise<any> | null = null;
+
+// Only one “log bucket” for everything:
+const RECALL_BUCKET_ALIAS = 'kintask-log-bucket-v1';
+let logBucketAddress: Address | null = config.recallLogBucket
+  ? (config.recallLogBucket as Address)
+  : null;
+
+// Our single private key wallet
 let account: Account | null = null;
-const RECALL_BUCKET_ALIAS = 'kintask-log-bucket-v1'; // Unique alias for this project's log bucket
-let initPromise: Promise<RecallClient> | null = null; // To handle concurrent initializations
 
-// --- Helper: Create Viem Wallet Client ---
+// Controls concurrency for EVM nonces
+let isProcessingTx = false;
+const txQueue: Array<() => Promise<any>> = [];
+
+// We remember which buckets we’ve already approved (in this runtime) so we don’t spam approvals.
+const approvedBuckets = new Set<Address>();
+
+// ----------------------------------------------------
+//                 HELPER FUNCTIONS
+// ----------------------------------------------------
+
+/**
+ * Create a Viem wallet client from RECALL_PRIVATE_KEY in .env
+ */
 function getWalletClient(): WalletClient {
-    if (!config.recallPrivateKey) {
-        throw new Error('Recall Private Key (PRIVATE_KEY in .env) is not configured.');
-    }
-    const formattedPrivateKey = config.recallPrivateKey.startsWith('0x')
-        ? config.recallPrivateKey as `0x${string}`
-        : `0x${config.recallPrivateKey}` as `0x${string}`;
+  if (!config.recallPrivateKey) {
+    throw new Error('No RECALL_PRIVATE_KEY found in config/.env');
+  }
 
-    if (!account) { // Cache the account object
-         account = privateKeyToAccount(formattedPrivateKey);
-         console.log(`[Recall Service] Using wallet address: ${account.address} on chain ${testnet.id}`);
-    }
+  const formattedPrivateKey = config.recallPrivateKey.startsWith('0x')
+    ? (config.recallPrivateKey as `0x${string}`)
+    : (`0x${config.recallPrivateKey}` as `0x${string}`);
 
-    // Ensure the transport is configured for the correct chain
-    return createWalletClient({
-        account: account,
-        chain: testnet, // Explicitly set Recall testnet chain
-        transport: http(), // Default HTTP transport - Add RPC URL from testnet config if needed explicitly
-                          // transport: http(testnet.rpcUrls.default.http[0]),
-    });
+  if (!account) {
+    account = privateKeyToAccount(formattedPrivateKey);
+    console.log(`[Recall Service] Using wallet: ${account.address} on chain: ${testnet.id}`);
+  }
+
+  return createWalletClient({
+    account,
+    chain: testnet,
+    transport: http(),
+  });
 }
 
- // --- Helper: Create Viem Public Client ---
- function getPublicClient(): PublicClient {
-     return createPublicClient({
-         chain: testnet, // Use Recall testnet chain
-         transport: http(),
-     });
- }
+/**
+ * Create a read-only client for awaiting transaction receipts, etc.
+ */
+function getPublicClient(): PublicClient {
+  return createPublicClient({
+    chain: testnet,
+    transport: http(),
+  });
+}
 
-
-// --- Helper: Get or Initialize Recall Client (Singleton Pattern) ---
-async function getRecallClient(): Promise<RecallClient> {
-    if (recallClientInstance && isRecallInitialized) {
-        return recallClientInstance;
-    }
-    // Prevent race conditions during initialization
-    if (initPromise) {
-        return initPromise;
-    }
-
-    initPromise = (async () => {
-        console.log("[Recall Service] Initializing Recall Client (getRecallClient)...");
-        try {
-            const walletClient = getWalletClient(); // Get viem wallet client configured for Recall testnet
-            const client = new RecallClient({ walletClient });
-
-            // Basic check: Ensure client has account after initialization
-            if (!client.walletClient.account?.address) {
-                throw new Error("Failed to initialize client: Wallet address missing.");
-            }
-            console.log("[Recall Service] Recall Client Initialized successfully.");
-            recallClientInstance = client;
-            isRecallInitialized = true; // Mark as initialized
-            initPromise = null; // Clear promise
-            return client;
-        } catch (error: any) {
-            console.error("[Recall Service] FATAL ERROR initializing Recall Client:", error.message);
-            recallClientInstance = null;
-            isRecallInitialized = false;
-            initPromise = null;
-            throw new Error(`Recall Client initialization failed: ${error.message}`); // Rethrow to calling function
-        }
-    })();
-
+/**
+ * Singleton pattern for the RecallClient, loaded dynamically.
+ */
+async function getRecallClient(): Promise<any> {
+  if (recallClientInstance && isRecallInitialized) {
+    return recallClientInstance;
+  }
+  if (initPromise) {
     return initPromise;
+  }
+
+  initPromise = (async () => {
+    try {
+      console.log('[Recall Service] Initializing dynamic RecallClient...');
+      const RecallClient = await loadRecallClientModule();
+
+      const walletClient = getWalletClient();
+      const client = new RecallClient({ walletClient });
+
+      if (!client.walletClient.account?.address) {
+        throw new Error('No wallet address after RecallClient init.');
+      }
+      console.log('[Recall Service] RecallClient initialized successfully.');
+
+      recallClientInstance = client;
+      isRecallInitialized = true;
+      initPromise = null;
+      return client;
+    } catch (err: any) {
+      const msg = err instanceof Error ? err.message.split('\n')[0] : String(err);
+      console.error('[Recall Service] FATAL: Could not init RecallClient:', msg);
+
+      recallClientInstance = null;
+      isRecallInitialized = false;
+      initPromise = null;
+      throw new Error(`Recall Client init failed: ${msg}`);
+    }
+  })();
+
+  return initPromise;
 }
 
-// --- Helper: Ensure Credit Balance ---
-// Returns true if credit was sufficient OR successfully purchased, false otherwise
-async function ensureCreditBalanceIfZero(recall: RecallClient): Promise<boolean> {
-    console.log("[Recall Service] Checking credit balance...");
-    try {
-        const creditManager = recall.creditManager();
-        const { result: creditBalance } = await creditManager.getCreditBalance();
-        const creditFree = creditBalance?.creditFree ?? 0n;
-        console.log(`[Recall Service] Current credit_free: ${creditFree.toString()}`);
-
-        if (creditFree === 0n) { // Only buy if exactly zero
-            console.log('[Recall Service] credit_free is 0, attempting to buy 1 credit...');
-            const amountToBuy = parseEther("1");
-            const { meta } = await creditManager.buy(amountToBuy);
-            const txHash = meta?.tx?.transactionHash;
-            if (!txHash) throw new Error("Credit purchase transaction did not return a hash.");
-
-            console.log(`[Recall Service] Credit purchase transaction sent: ${txHash}. Waiting for confirmation...`);
-            const publicClient = getPublicClient();
-            const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash, confirmations: 1 });
-
-            if (receipt.status === 'success') {
-                 console.log(`[Recall Service] Credit purchased successfully (Tx: ${txHash}).`);
-                 await new Promise(resolve => setTimeout(resolve, 3000)); // Allow buffer time
-                 return true;
-            } else {
-                 console.error(`[Recall Service] Credit purchase transaction failed (Tx: ${txHash}). Status: ${receipt.status}`);
-                 throw new Error(`Failed to purchase Recall credit (Tx: ${txHash}, Status: ${receipt.status}).`);
-            }
+/**
+ * Our transaction queue ensures we do one on-chain call at a time (nonce mgmt).
+ */
+async function processTxQueue<T>(txFunction: () => Promise<T>): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const runTx = async () => {
+      if (isProcessingTx) {
+        txQueue.push(runTx);
+        return;
+      }
+      isProcessingTx = true;
+      try {
+        const result = await txFunction();
+        resolve(result);
+      } catch (err: any) {
+        const errMsg = err?.shortMessage || err?.message || String(err);
+        console.error('[Recall Tx Queue] Tx error:', errMsg.split('\n')[0]);
+        reject(err);
+      } finally {
+        isProcessingTx = false;
+        const nextTx = txQueue.shift();
+        if (nextTx) {
+          console.log(`[Recall Tx Queue] Next tx in queue... (${txQueue.length} left)`);
+          setImmediate(() => {
+            nextTx().catch((queueError) => {
+              const qErrMsg = queueError?.shortMessage || queueError?.message || String(queueError);
+              console.error('[Recall Tx Queue] Error processing subsequent tx:', qErrMsg);
+            });
+          });
         }
-        return true; // Credit was > 0 initially
-    } catch (error: any) {
-        console.error("[Recall Service] Error checking or buying credit:", error.message);
-         if (error instanceof ChainMismatchError) {
-              console.error("[Recall Service] Chain mismatch detected. Check Recall SDK/Chain config.");
-         }
-        // Rethrow or return false to indicate failure? Let's rethrow for clarity.
-        throw new Error(`Failed to ensure Recall credit balance: ${error.message}`);
-    }
-}
-
-// --- Helper: Find or Create Log Bucket ---
-async function ensureLogBucket(recall: RecallClient): Promise<string> {
-    if (logBucketAddress) {
-        return logBucketAddress;
-    }
-
-    console.log(`[Recall Service] Attempting to find or create log bucket with alias: ${RECALL_BUCKET_ALIAS}`);
-    const bucketManager = recall.bucketManager();
-    let foundBucket: string | null = null;
-
-    try {
-        const { result: listResult } = await bucketManager.list();
-        const buckets = listResult?.buckets || [];
-        console.log(`[Recall Service] Checking ${buckets.length} accessible buckets for alias...`);
-
-        for (const bucketAddr of buckets) {
-            try {
-                // list returns { kind: string, addr: string, metadata: Record<string, unknown> }[]
-                // No need to call getMetadata separately if list returns it
-                if (bucketAddr.metadata?.alias === RECALL_BUCKET_ALIAS) {
-                    console.log(`[Recall Service] Found existing log bucket: ${bucketAddr.addr}`);
-                    foundBucket = bucketAddr.addr;
-                    break;
-                }
-            } catch (listError: any) { /* Handle specific list errors if needed */ }
-        }
-
-        if (!foundBucket) {
-            console.log(`[Recall Service] Log bucket alias '${RECALL_BUCKET_ALIAS}' not found. Creating new bucket...`);
-            await ensureCreditBalanceIfZero(recall); // Ensure credit before creating
-
-            const createMetaPayload = { alias: RECALL_BUCKET_ALIAS, createdBy: 'KintaskBackend', timestamp: new Date().toISOString() };
-            const { result, meta: createMetaInfo } = await bucketManager.create({ metadata: createMetaPayload });
-            foundBucket = result?.bucket;
-            const createTxHash = createMetaInfo?.tx?.transactionHash;
-
-            if (foundBucket) {
-                 console.log(`[Recall Service] Successfully created new log bucket: ${foundBucket} (Tx: ${createTxHash})`);
-                 console.warn(`ACTION REQUIRED: Consider adding/updating RECALL_LOG_BUCKET in .env to: ${foundBucket} for faster startup.`);
-            } else {
-                 const errorMsg = createMetaInfo?.error?.message || "Bucket creation call succeeded but no bucket address was returned.";
-                 console.error("[Recall Service] Bucket creation failed:", errorMsg, createMetaInfo);
-                 throw new Error(errorMsg);
-            }
-        }
-
-        logBucketAddress = foundBucket; // Cache address
-        return logBucketAddress;
-
-    } catch (error: any) {
-        console.error("[Recall Service] Error finding or creating log bucket:", error.message);
-        throw new Error(`Failed to ensure Recall log bucket: ${error.message}`);
-    }
-}
-
-// --- Main Logging Function ---
-export async function logRecallEvent(
-    type: RecallEventType,
-    details: Record<string, any>,
-    requestContext: string
-): Promise<string | undefined> { // Returns Recall Tx Hash or undefined
-
-    if (!requestContext) {
-         console.error("[Recall Service] CRITICAL: logRecallEvent called without requestContext.");
-         return undefined;
-    }
-
-    let recall: RecallClient;
-    let bucketAddr: string;
-    try {
-        // Get client, bucket, and ensure credit *before* creating log entry object
-        recall = await getRecallClient();
-        bucketAddr = await ensureLogBucket(recall);
-        await ensureCreditBalanceIfZero(recall);
-    } catch (setupError: any) {
-        console.error(`[Recall Service] Setup failed before logging event ${type} (Context: ${requestContext}):`, setupError.message);
-        return undefined; // Cannot log if setup fails
-    }
-
-    const logEntry: RecallLogEntryData = {
-        timestamp: new Date().toISOString(),
-        type: type,
-        details: details,
-        requestContext: requestContext,
+      }
     };
 
-    // Prepare data for storage
-    const contentString = JSON.stringify(logEntry);
-    const fileBuffer = Buffer.from(contentString, 'utf8');
-    const timestampSuffix = logEntry.timestamp.replace(/[:.]/g, '-');
-    const key = `${requestContext}/${timestampSuffix}_${type}.json`; // Structure logs by request context
-
-    // console.log(`[Recall Service] Logging Event [${requestContext}] Type=${type} to Bucket ${bucketAddr.substring(0,10)}... Key=${key.substring(0,50)}...`);
-
-    try {
-        const bucketManager = recall.bucketManager();
-        const { meta } = await bucketManager.add(bucketAddr, key, fileBuffer);
-        const txHash = meta?.tx?.transactionHash;
-
-        if (!txHash) {
-             console.warn(`[Recall Service] Log add successful (according to SDK meta?) for context ${requestContext}, type ${type}, but no txHash returned. Status uncertain.`);
-             // Check meta for other status info if available
-             return undefined;
-        }
-
-        console.log(`[Recall Service] Log Event ${type} stored for context ${requestContext}. TxHash: ${txHash}`);
-        return txHash;
-
-    } catch (error: any) {
-        console.error(`[Recall Service] Error adding log event ${type} for context ${requestContext} to bucket ${bucketAddr}:`, error.message);
-        return undefined; // Indicate logging failure
+    if (!isProcessingTx && txQueue.length === 0) {
+      runTx();
+    } else {
+      console.log(`[Recall Tx Queue] Queueing tx (new size: ${txQueue.length + 1})...`);
+      txQueue.push(runTx);
     }
+  });
 }
 
-// --- Trace Retrieval Function ---
-export async function getTraceFromRecall(requestContext: string): Promise<RecallLogEntryData[]> {
-    if (!requestContext) return [];
+/**
+ * Check credit balance. If zero, buy 1 RTC credit. 
+ * (One credit can let you store multiple small objects, so you may consider buying more if you do many writes.)
+ */
+async function ensureCreditBalance(recall: any) {
+  console.log('[Recall Service] Checking credit balance...');
+  const creditManager = recall.creditManager();
+  const { result: creditBalance } = await creditManager.getCreditBalance();
 
-    console.log(`[Recall Service] Retrieving trace for context: ${requestContext}`);
-    let recall: RecallClient;
-    let bucketAddr: string;
-    try {
-        recall = await getRecallClient();
-        // Use cached bucket address if available, otherwise ensure it exists
-        bucketAddr = logBucketAddress || await ensureLogBucket(recall);
-    } catch (initError: any) {
-         console.error(`[Recall Service] Initialization failed for retrieving trace (Context: ${requestContext}):`, initError.message);
-         return [];
+  const creditFree = creditBalance?.creditFree ?? 0n;
+  console.log(`[Recall Service] creditFree: ${formatEther(creditFree)} RTC`);
+
+  if (creditFree === 0n) {
+    console.log('[Recall Service] credit_free == 0, buying 1 RTC...');
+    const txHash = await processTxQueue(async () => {
+      const { meta } = await creditManager.buy(parseEther('1'));
+      return meta?.tx?.transactionHash;
+    });
+
+    if (!txHash) throw new Error('Credit buy transaction returned no hash.');
+    console.log(`[Recall Service] buy(1 RTC) => txHash=${txHash}. Waiting receipt...`);
+
+    const receipt = await getPublicClient().waitForTransactionReceipt({ hash: txHash });
+    if (receipt.status !== 'success') {
+      throw new Error(`Credit buy failed. Tx status: ${receipt.status}`);
     }
-
-    try {
-        const bucketManager = recall.bucketManager();
-        const prefix = `${requestContext}/`; // Query by the context "folder"
-
-        console.log(`[Recall Service] Querying bucket ${bucketAddr.substring(0,10)}... for prefix: ${prefix}`);
-        const { result: queryResult } = await bucketManager.query(bucketAddr, { prefix: prefix, delimiter: '' });
-
-        const objectInfos = (queryResult?.objects || []);
-        const objectKeys = objectInfos.map(obj => obj.key).filter((k): k is string => !!k && k.endsWith('.json'));
-
-        if (objectKeys.length === 0) {
-            console.log(`[Recall Service] No log entries found via query for context: ${requestContext}`);
-            return [];
-        }
-        console.log(`[Recall Service] Found ${objectKeys.length} log keys for context ${requestContext}. Fetching content...`);
-
-        // Fetch content concurrently
-        const fetchPromises = objectKeys.map(async (key) => {
-             try {
-                 const { result: objectResult } = await bucketManager.get(bucketAddr, key);
-                 const objectBuf = objectResult as Uint8Array | null; // SDK's get returns Uint8Array
-                 if (!objectBuf) {
-                     console.warn(`[Recall Service] Got null buffer for key ${key}`);
-                     return null;
-                 }
-                 // Ensure it's a Buffer before decoding (Node.js Buffer handles Uint8Array)
-                 const buffer = Buffer.from(objectBuf);
-                 const textContent = buffer.toString('utf8');
-                 const logEntry = JSON.parse(textContent) as RecallLogEntryData;
-                 if (logEntry && logEntry.timestamp && logEntry.type && logEntry.details) {
-                      return logEntry;
-                 }
-                 console.warn(`[Recall Service] Invalid log format found parsing key ${key}`);
-                 return null;
-             } catch (fetchError: any) {
-                  console.error(`[Recall Service] Error fetching/parsing key ${key}: ${fetchError.message}`);
-                   if (fetchError.message?.includes("Object not found")) {
-                        console.warn(`   -> Object likely deleted or query/get mismatch for key ${key}`);
-                   }
-                  return null;
-             }
-        });
-
-        const logEntries = (await Promise.all(fetchPromises))
-                            .filter((entry): entry is RecallLogEntryData => entry !== null)
-                            .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()); // Sort chronologically
-
-         console.log(`[Recall Service] Successfully retrieved and parsed ${logEntries.length} log entries for context: ${requestContext}`);
-         return logEntries;
-
-    } catch (error: any) {
-        console.error(`[Recall Service] Error retrieving trace for context ${requestContext}:`, error.message);
-        return []; // Return empty trace on error
-    }
+    console.log('[Recall Service] Credits purchased successfully.');
+  } else {
+    console.log('[Recall Service] Sufficient credits. No purchase needed.');
+  }
 }
 
-// Removed duplicate declaration: let logBucketAddress = config.recallLogBucket || null;
+/**
+ * Ensure we have approved the given bucket to consume your credits. 
+ * We store the result in `approvedBuckets` so we only do it once per bucket in this runtime.
+ */
+async function ensureBucketApproval(recall: any, bucketAddress: Address) {
+  if (approvedBuckets.has(bucketAddress)) {
+    // Already approved in this session
+    return;
+  }
+  console.log('[Recall Service] Checking credit approval for bucket:', bucketAddress);
+
+  const creditManager = recall.creditManager();
+  const selfAddr = recall.walletClient.account?.address;
+  if (!selfAddr) throw new Error('No wallet address in recall client?');
+
+  // See if we've previously approved this bucket. If not, do so once.
+  const { result: acctInfo } = await creditManager.getAccount(selfAddr);
+  const alreadyApproved = acctInfo?.approvalsTo?.some(
+    (appr: any) => appr.addr.toLowerCase() === bucketAddress.toLowerCase()
+  );
+
+  if (alreadyApproved) {
+    console.log(`[Recall Service] Bucket ${bucketAddress} already approved.`);
+  } else {
+    console.log(`[Recall Service] Approving bucket ${bucketAddress}...`);
+    const txHash = await processTxQueue(async () => {
+      const { meta } = await creditManager.approve(bucketAddress, [], 0n, 0n, 0n);
+      return meta?.tx?.transactionHash;
+    });
+    if (!txHash) {
+      throw new Error('Bucket approval tx returned no hash.');
+    }
+    console.log(`[Recall Service] Approve tx sent: ${txHash}. Waiting on receipt...`);
+    const receipt = await getPublicClient().waitForTransactionReceipt({ hash: txHash });
+    if (receipt.status !== 'success') {
+      throw new Error(`Bucket approval failed. Tx status: ${receipt.status}`);
+    }
+    console.log('[Recall Service] Bucket approval confirmed on-chain.');
+  }
+
+  approvedBuckets.add(bucketAddress);
+}
+
+/**
+ * Ensure we have a single "log bucket". We do not create multiple.
+ * If we already know `logBucketAddress`, use it. Otherwise, create or find by alias.
+ */
+async function ensureLogBucket(recall: any): Promise<Address> {
+  if (logBucketAddress) {
+    return logBucketAddress;
+  }
+
+  console.log(`[Recall Service] Checking for log bucket with alias="${RECALL_BUCKET_ALIAS}"...`);
+  const bucketManager = recall.bucketManager();
+
+  // List all known buckets
+  const { result: listRes } = await bucketManager.list();
+  const allBuckets = listRes?.buckets ?? [];
+  let foundAddr: Address | undefined;
+
+  // Check each bucket's metadata to see if it has our alias
+  for (const b of allBuckets) {
+    try {
+      const metaRes = await bucketManager.getMetadata(b);
+      if (metaRes.result?.metadata?.alias === RECALL_BUCKET_ALIAS) {
+        foundAddr = b;
+        break;
+      }
+    } catch {
+      /* ignore fetch errors */
+    }
+  }
+
+  if (foundAddr) {
+    console.log('[Recall Service] Found existing log bucket:', foundAddr);
+    logBucketAddress = foundAddr;
+    return foundAddr;
+  }
+
+  // Not found => create
+  console.log('[Recall Service] No log bucket found. Creating a new one...');
+  await ensureCreditBalance(recall);
+
+  const createResult = await processTxQueue(async () => {
+    const { result, meta } = await bucketManager.create({
+      metadata: {
+        alias: RECALL_BUCKET_ALIAS,
+        createdBy: 'KintaskBackend',
+        timestamp: new Date().toISOString(),
+      },
+    });
+    return { bucket: result?.bucket as Address, txHash: meta?.tx?.transactionHash };
+  });
+
+  if (!createResult.bucket) {
+    throw new Error('Bucket creation returned no address.');
+  }
+  console.log(`[Recall Service] Created bucket: ${createResult.bucket} (txHash=${createResult.txHash})`);
+  console.warn(`Please update .env with RECALL_LOG_BUCKET=${createResult.bucket}`);
+
+  logBucketAddress = createResult.bucket;
+  return logBucketAddress;
+}
+
+// ----------------------------------------------------
+//                PUBLIC SERVICE FUNCTIONS
+// ----------------------------------------------------
+
+/**
+ * Add an object to our single "log bucket" in one transaction.
+ * This is the main function that actually writes on-chain.
+ */
+export async function addObjectToBucket(
+  dataObject: object,
+  key: string
+): Promise<{
+  success: boolean;
+  bucket?: string;
+  key?: string;
+  txHash?: string;
+  error?: string;
+}> {
+  // Optional short-circuit for dev
+  if (process.env.MOCK_RECALL === 'true') {
+    console.log(`[Recall Service MOCK] addObjectToBucket: key=${key}`);
+    return {
+      success: true,
+      bucket: '0xmockBucket',
+      key,
+      txHash: '0xmockTxHash',
+    };
+  }
+
+  let recall: any;
+  let bucketAddr: Address;
+  try {
+    // 1) Recall client
+    recall = await getRecallClient();
+    // 2) Ensure log bucket
+    bucketAddr = await ensureLogBucket(recall);
+    // 3) Ensure credit & approval for that bucket
+    await ensureCreditBalance(recall);
+    await ensureBucketApproval(recall, bucketAddr);
+  } catch (setupError: any) {
+    const errMsg = setupError?.message?.split('\n')[0] || String(setupError);
+    console.error('[Recall Setup Error] addObjectToBucket:', errMsg);
+    return { success: false, error: `Setup failed: ${errMsg}` };
+  }
+
+  console.log(`[Recall Service] Storing object => Bucket: ${bucketAddr}, Key: ${truncateText(key, 60)}`);
+  try {
+    const contentStr = JSON.stringify(dataObject);
+    const fileBuffer = Buffer.from(contentStr, 'utf8');
+
+    // 4) Do the actual add
+    const txHash = await processTxQueue(async () => {
+      const { meta } = await recall.bucketManager().add(bucketAddr, key, fileBuffer);
+      return meta?.tx?.transactionHash;
+    });
+
+    if (!txHash) {
+      console.warn('[Recall Service] addObjectToBucket ended with no txHash (?), returning success anyway.');
+      return { success: true, bucket: bucketAddr, key };
+    }
+    console.log(`[Recall Service] Object stored. Key=${key}, tx=${txHash.slice(0, 20)}...`);
+
+    return { success: true, bucket: bucketAddr, key, txHash };
+  } catch (err: any) {
+    let conciseError = `Failed adding object (key=${truncateText(key, 30)})`;
+    if (err instanceof BaseError) {
+      conciseError = err.shortMessage || err.message.split('\n')[0];
+    } else if (err instanceof Error) {
+      conciseError = err.message.split('\n')[0];
+    } else {
+      conciseError = String(err);
+    }
+
+    // Possibly parse error messages for "insufficient funds" or "approval not found"...
+    console.error('[Recall Service] addObjectToBucket error:', conciseError);
+    return { success: false, error: conciseError };
+  }
+}
+
+/**
+ * Example function: Log a CRITICAL error event. 
+ * If called often, it can get expensive (one transaction each call). 
+ * To optimize, you might store multiple errors in memory and call addObjectToBucket() once with a batch.
+ */
+export async function logErrorEvent(
+  details: Record<string, any>,
+  requestContext: string
+): Promise<string | undefined> {
+  if (process.env.MOCK_RECALL === 'true') {
+    console.log('[Recall Service MOCK] logErrorEvent for requestContext:', requestContext);
+    return '0xmock_error_tx';
+  }
+  if (!requestContext) {
+    console.error('[Recall Service] logErrorEvent missing requestContext');
+    return undefined;
+  }
+
+  const logEntry = {
+    timestamp: new Date().toISOString(),
+    type: 'VERIFICATION_ERROR' as RecallEventType,
+    details,
+    requestContext,
+  };
+
+  const timeSfx = logEntry.timestamp.replace(/[:.]/g, '-').replace('T', '_').replace('Z', '');
+  const key = `${requestContext}/ERROR_${details.stage || 'Unknown'}_${timeSfx}.json`;
+
+  const result = await addObjectToBucket(logEntry, key);
+  if (!result.success) {
+    console.error('[Recall Service] Could not log error event:', result.error);
+    return undefined;
+  }
+  console.log('[Recall Service] Logged error event, txHash=', result.txHash);
+  return result.txHash;
+}
+
+/**
+ * Example function: Log the final verification trace. 
+ * Again, this is a separate on-chain call. Combine if you want fewer writes.
+ */
+export async function logFinalVerificationTrace(
+  requestContext: string,
+  verificationResult: VerificationResultInternal
+): Promise<string | undefined> {
+  if (process.env.MOCK_RECALL === 'true') {
+    console.log('[Recall Service MOCK] logFinalVerificationTrace, context=', requestContext);
+    return '0xmock_final_tx';
+  }
+  if (!requestContext || !verificationResult) {
+    console.error('[Recall Service] Missing context or result for final batch log.');
+    return undefined;
+  }
+
+  const isError = verificationResult.finalVerdict.startsWith('Error:');
+  const logType: RecallEventType = isError ? 'VERIFICATION_ERROR' : 'VERIFICATION_COMPLETE';
+
+  const finalLogObject = {
+    timestamp: new Date().toISOString(),
+    type: logType,
+    requestContext,
+    finalVerdict: verificationResult.finalVerdict,
+    finalConfidence: verificationResult.confidenceScore,
+    timelockRequestId: verificationResult.timelockRequestId,
+    timelockCommitTxHash: verificationResult.timelockCommitTxHash,
+    usedEvidenceCids: verificationResult.usedFragmentCids,
+    fullTrace: verificationResult.reasoningSteps,
+  };
+
+  const timeSfx = finalLogObject.timestamp.replace(/[:.]/g, '-').replace('T', '_').replace('Z', '');
+  const key = `${requestContext}/FINAL_TRACE_${logType}_${timeSfx}.json`;
+
+  const result = await addObjectToBucket(finalLogObject, key);
+  if (!result.success) {
+    console.error('[Recall Service] Could not log final trace:', result.error);
+    return undefined;
+  }
+  console.log('[Recall Service] Final batch trace logged, txHash=', result.txHash);
+  return result.txHash;
+}
+
+/**
+ * Example function to read back logs from the single log bucket. 
+ * If you only do a single “batch” write, you can parse them in one go, 
+ * but here we do a simple prefix query and fetch each .json.
+ */
+export async function getTraceFromRecall(
+  requestContext: string
+): Promise<RecallLogEntryData[]> {
+  if (process.env.MOCK_RECALL === 'true') {
+    console.log('[Recall Service MOCK] getTraceFromRecall => returns empty');
+    return [];
+  }
+  if (!requestContext) return [];
+
+  console.log('[Recall Service] getTraceFromRecall, prefix=', requestContext);
+  let recall: any;
+  let bucketAddr: Address;
+
+  try {
+    recall = await getRecallClient();
+    bucketAddr = await ensureLogBucket(recall);
+  } catch (initError) {
+    const msg = initError instanceof Error
+      ? initError.message.split('\n')[0]
+      : String(initError);
+    console.error('[Recall Service] getTraceFromRecall init error:', msg);
+    return [];
+  }
+
+  try {
+    const bucketManager = recall.bucketManager();
+    const prefix = `${requestContext}/`;
+
+    const { result: qRes } = await bucketManager.query(bucketAddr, {
+      prefix,
+      delimiter: '',
+    });
+
+    // Filter to .json keys
+    const objectKeys = (qRes?.objects ?? [])
+      .map((o: any) => o.key)
+      .filter((k: string | undefined) => k && k.endsWith('.json')) as string[];
+
+    if (!objectKeys.length) {
+      console.log('[Recall Service] No .json objects found with prefix:', prefix);
+      return [];
+    }
+
+    console.log(`[Recall Service] Found ${objectKeys.length} objects; fetching each...`);
+    const fetchPromises = objectKeys.map(async (key) => {
+      try {
+        const { result: objBuf } = await bucketManager.get(bucketAddr, key);
+        if (!objBuf) return null;
+
+        const buf = Buffer.from(objBuf as Uint8Array);
+        const text = buf.toString('utf8');
+        try {
+          const parsed = JSON.parse(text);
+          // If it has a "fullTrace" array, that might be the final batch. 
+          if (Array.isArray(parsed.fullTrace)) {
+            // Return that array so we can flatten 
+            return parsed.fullTrace as RecallLogEntryData[];
+          } else {
+            // Possibly a single log
+            return [parsed as RecallLogEntryData];
+          }
+        } catch (parseErr) {
+          console.warn('[Recall Service] JSON parse error for key=', key, parseErr);
+          return null;
+        }
+      } catch (err) {
+        console.warn('[Recall Service] getTraceFromRecall fetch error, key=', key, err);
+        return null;
+      }
+    });
+
+    const nested = (await Promise.all(fetchPromises)).filter(Boolean) as RecallLogEntryData[][];
+    const flat = nested.flat().sort(
+      (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+    );
+    console.log(`[Recall Service] Fetched ${flat.length} trace items total.`);
+    return flat;
+  } catch (err) {
+    console.error('[Recall Service] Error querying/fetching logs:', String(err));
+    return [];
+  }
+}

@@ -14,10 +14,10 @@
     "@recallnet/sdk": "latest",
     "@web3-storage/w3up-client": "^17.2.0",
     "axios": "^1.6.8",
-    "blocklock-js": "0.0.8-rc1",
+    "blocklock-js": "latest",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
-    "ethers": "^6.11.1",
+    "ethers": "^5.7.2",
     "express": "^4.18.3",
     "files-from-path": "^1.1.4",
     "viem": "latest"

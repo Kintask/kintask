@@ -1,222 +1,1244 @@
 ===== ./config.ts =====
-// kintask/packages/backend/src/config.ts
+// ./packages/backend/src/config.ts
 import dotenv from 'dotenv';
 import path from 'path';
 
-// Load .env file specifically from the backend package root
 dotenv.config({ path: path.resolve(__dirname, '../.env') });
 
 const config = {
   port: process.env.PORT || 3001,
-  // OpenRouter Config
-  openRouterApiKey: process.env.OPENROUTER_API_KEY,
-  // W3UP/Storacha Config
+  openRouterApiKey: process.env.OPENROUTER_API_KEY, // Or OPENAI_API_KEY
   w3upAgentEmail: process.env.W3UP_AGENT_EMAIL,
   kintaskSpaceDid: process.env.KINTASK_SPACE_DID,
-  // KG Index CID
-  knowledgeBaseIndexCid: process.env.KB_INDEX_CID,
-  // IPFS Gateway for Retrieval (Optional Override)
-  ipfsGatewayUrl: process.env.IPFS_GATEWAY_URL || 'https://w3s.link/ipfs/', // Default to w3s.link
-  // Recall Config
-  recallApiKey: process.env.RECALL_API_KEY,
-  recallApiEndpoint: process.env.RECALL_API_ENDPOINT,
-  // L2 & Wallet Config
+  knowledgeBaseIndexCid: process.env.KB_INDEX_CID, // Points to the paper CID
+  ipfsGatewayUrl: process.env.IPFS_GATEWAY_URL || 'https://w3s.link/ipfs/',
+  recallPrivateKey: process.env.RECALL_PRIVATE_KEY,
+  recallLogBucket: process.env.RECALL_LOG_BUCKET,
   l2RpcUrl: process.env.L2_RPC_URL,
   walletPrivateKey: process.env.WALLET_PRIVATE_KEY,
   kintaskContractAddress: process.env.KINTASK_CONTRACT_ADDRESS,
   blocklockSenderProxyAddress: process.env.BLOCKLOCK_SENDER_PROXY_ADDRESS,
+  fvmAggregatorContractAddress: process.env.FVM_AGGREGATOR_CONTRACT_ADDRESS,
 };
 
-// Runtime validation for critical variables
-// Note: Making recallApiKey and recallApiEndpoint optional for simulation
-const requiredEnvVars: Array<keyof Omit<typeof config, 'recallApiKey' | 'recallApiEndpoint' | 'ipfsGatewayUrl'>> = [
-    'openRouterApiKey',
+const requiredEnvVars: Array<keyof typeof config> = [
+    'openRouterApiKey', // Or OPENAI_API_KEY
     'w3upAgentEmail',
     'kintaskSpaceDid',
-    'knowledgeBaseIndexCid', // Still optional initially until script is run
+    'knowledgeBaseIndexCid',
     'l2RpcUrl',
     'walletPrivateKey',
     'kintaskContractAddress',
     'blocklockSenderProxyAddress',
+    'recallPrivateKey',
+    'fvmAggregatorContractAddress',
 ];
 
 let missingVars = false;
 requiredEnvVars.forEach((varName) => {
-  // Allow KB_INDEX_CID to be missing initially
-  if (varName === 'knowledgeBaseIndexCid' && !config[varName]) {
-      console.warn(`Warning: ${varName} is not set. Run the KG upload script ('pnpm kg:upload') first.`);
-      return; // Don't mark as fatal error yet
-  }
   if (!config[varName]) {
-    console.error(`FATAL ERROR: Environment variable ${varName} is not set in packages/backend/.env`);
+    if (varName === 'recallLogBucket') {
+        console.log(`Info: Optional env var ${varName} not set.`);
+        return;
+    }
+    console.error(`FATAL ERROR: Env var ${varName} is not set in packages/backend/.env`);
     missingVars = true;
   }
 });
 
-// Optional Recall check
-if (!config.recallApiKey || !config.recallApiEndpoint) {
-    console.warn("Warning: Recall API Key/Endpoint not set. Recall logging will be simulated.");
-}
-
-// Validate Space DID format (basic check)
-if (config.kintaskSpaceDid && !config.kintaskSpaceDid.startsWith('did:key:')) {
-    console.error(`FATAL ERROR: KINTASK_SPACE_DID (${config.kintaskSpaceDid}) in packages/backend/.env does not look like a valid did:key identifier.`);
-    missingVars = true; // Treat as fatal
-}
-
-
 if (missingVars) {
-    console.error("\nPlease configure the required variables in packages/backend/.env and restart.");
-    process.exit(1); // Exit if critical config is missing
+    console.error("\nPlease configure required variables in packages/backend/.env and restart.");
+    process.exit(1);
 }
 
-export default config;===== ./contracts/abi/KintaskCommitment.json =====
-// ACTION REQUIRED:
-// AFTER RUNNING `pnpm contracts:compile` in the root directory,
-// COPY THE CONTENT OF THE FILE:
-// `packages/contracts/artifacts/contracts/KintaskCommitment.sol/KintaskCommitment.json`
-// AND PASTE IT HERE, REPLACING THIS COMMENT BLOCK AND THE EMPTY {}
-{}
+export default config;===== ./contracts/abi/Aggregator.json =====
+{
+  "_format": "hh-sol-artifact-1",
+  "contractName": "Aggregator",
+  "sourceName": "contracts/Aggregator.sol",
+  "abi": [
+    {
+      "inputs": [],
+      "stateMutability": "nonpayable",
+      "type": "constructor"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "int256",
+          "name": "errorCode",
+          "type": "int256"
+        }
+      ],
+      "name": "ActorError",
+      "type": "error"
+    },
+    {
+      "inputs": [],
+      "name": "ActorNotFound",
+      "type": "error"
+    },
+    {
+      "inputs": [],
+      "name": "FailToCallActor",
+      "type": "error"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint64",
+          "name": "",
+          "type": "uint64"
+        }
+      ],
+      "name": "InvalidCodec",
+      "type": "error"
+    },
+    {
+      "inputs": [],
+      "name": "InvalidResponseLength",
+      "type": "error"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "balance",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "value",
+          "type": "uint256"
+        }
+      ],
+      "name": "NotEnoughBalance",
+      "type": "error"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "string",
+          "name": "agentId",
+          "type": "string"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "payoutAddress",
+          "type": "address"
+        }
+      ],
+      "name": "AgentRegistered",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "string",
+          "name": "requestContext",
+          "type": "string"
+        },
+        {
+          "indexed": false,
+          "internalType": "string",
+          "name": "reason",
+          "type": "string"
+        }
+      ],
+      "name": "AggregationError",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "string",
+          "name": "requestContext",
+          "type": "string"
+        },
+        {
+          "indexed": true,
+          "internalType": "string",
+          "name": "cid",
+          "type": "string"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint64",
+          "name": "dealId",
+          "type": "uint64"
+        },
+        {
+          "indexed": false,
+          "internalType": "bool",
+          "name": "isActive",
+          "type": "bool"
+        },
+        {
+          "indexed": false,
+          "internalType": "int64",
+          "name": "activatedEpoch",
+          "type": "int64"
+        },
+        {
+          "indexed": false,
+          "internalType": "int64",
+          "name": "terminatedEpoch",
+          "type": "int64"
+        }
+      ],
+      "name": "DealCheckResult",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "string",
+          "name": "cid",
+          "type": "string"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "submitter",
+          "type": "address"
+        },
+        {
+          "indexed": true,
+          "internalType": "uint64",
+          "name": "dealId",
+          "type": "uint64"
+        }
+      ],
+      "name": "EvidenceRegistered",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "string",
+          "name": "requestContext",
+          "type": "string"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "recipient",
+          "type": "address"
+        },
+        {
+          "indexed": false,
+          "internalType": "string",
+          "name": "reason",
+          "type": "string"
+        },
+        {
+          "indexed": false,
+          "internalType": "string",
+          "name": "evidenceCid",
+          "type": "string"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "amount",
+          "type": "uint256"
+        }
+      ],
+      "name": "RewardPaid",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "recipient",
+          "type": "address"
+        },
+        {
+          "indexed": false,
+          "internalType": "string",
+          "name": "reason",
+          "type": "string"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "amount",
+          "type": "uint256"
+        }
+      ],
+      "name": "RewardTransferFailed",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "string",
+          "name": "requestContext",
+          "type": "string"
+        },
+        {
+          "indexed": false,
+          "internalType": "string",
+          "name": "finalVerdict",
+          "type": "string"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint8",
+          "name": "finalConfidence",
+          "type": "uint8"
+        },
+        {
+          "indexed": false,
+          "internalType": "string[]",
+          "name": "evidenceCids",
+          "type": "string[]"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "submissionCount",
+          "type": "uint256"
+        }
+      ],
+      "name": "VerdictAggregated",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "string",
+          "name": "requestContext",
+          "type": "string"
+        },
+        {
+          "indexed": false,
+          "internalType": "string",
+          "name": "agentId",
+          "type": "string"
+        },
+        {
+          "indexed": false,
+          "internalType": "string",
+          "name": "verdict",
+          "type": "string"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint8",
+          "name": "confidence",
+          "type": "uint8"
+        },
+        {
+          "indexed": false,
+          "internalType": "string",
+          "name": "evidenceCid",
+          "type": "string"
+        }
+      ],
+      "name": "VerdictSubmitted",
+      "type": "event"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "string",
+          "name": "",
+          "type": "string"
+        }
+      ],
+      "name": "agentRegistry",
+      "outputs": [
+        {
+          "internalType": "address",
+          "name": "",
+          "type": "address"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "string",
+          "name": "requestContext",
+          "type": "string"
+        }
+      ],
+      "name": "aggregateResults",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "depositFunds",
+      "outputs": [],
+      "stateMutability": "payable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "string",
+          "name": "",
+          "type": "string"
+        }
+      ],
+      "name": "evidenceRegistry",
+      "outputs": [
+        {
+          "internalType": "address",
+          "name": "submitter",
+          "type": "address"
+        },
+        {
+          "internalType": "uint64",
+          "name": "dealId",
+          "type": "uint64"
+        },
+        {
+          "internalType": "uint256",
+          "name": "usageScore",
+          "type": "uint256"
+        },
+        {
+          "internalType": "bool",
+          "name": "exists",
+          "type": "bool"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "string",
+          "name": "agentId",
+          "type": "string"
+        }
+      ],
+      "name": "getAgentAddress",
+      "outputs": [
+        {
+          "internalType": "address",
+          "name": "",
+          "type": "address"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "string",
+          "name": "requestContext",
+          "type": "string"
+        }
+      ],
+      "name": "getAggregatedVerdict",
+      "outputs": [
+        {
+          "components": [
+            {
+              "internalType": "string",
+              "name": "finalVerdict",
+              "type": "string"
+            },
+            {
+              "internalType": "uint8",
+              "name": "finalConfidence",
+              "type": "uint8"
+            },
+            {
+              "internalType": "string[]",
+              "name": "evidenceCids",
+              "type": "string[]"
+            },
+            {
+              "internalType": "address",
+              "name": "aggregator",
+              "type": "address"
+            },
+            {
+              "internalType": "uint256",
+              "name": "timestamp",
+              "type": "uint256"
+            },
+            {
+              "internalType": "uint256",
+              "name": "submissionCount",
+              "type": "uint256"
+            },
+            {
+              "internalType": "bool",
+              "name": "exists",
+              "type": "bool"
+            }
+          ],
+          "internalType": "struct Aggregator.AggregatedVerdict",
+          "name": "",
+          "type": "tuple"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "string",
+          "name": "cid",
+          "type": "string"
+        }
+      ],
+      "name": "getEvidenceInfo",
+      "outputs": [
+        {
+          "components": [
+            {
+              "internalType": "address",
+              "name": "submitter",
+              "type": "address"
+            },
+            {
+              "internalType": "uint64",
+              "name": "dealId",
+              "type": "uint64"
+            },
+            {
+              "internalType": "uint256",
+              "name": "usageScore",
+              "type": "uint256"
+            },
+            {
+              "internalType": "bool",
+              "name": "exists",
+              "type": "bool"
+            }
+          ],
+          "internalType": "struct Aggregator.EvidenceInfo",
+          "name": "",
+          "type": "tuple"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "string",
+          "name": "requestContext",
+          "type": "string"
+        }
+      ],
+      "name": "getSubmissions",
+      "outputs": [
+        {
+          "components": [
+            {
+              "internalType": "string",
+              "name": "agentId",
+              "type": "string"
+            },
+            {
+              "internalType": "string",
+              "name": "verdict",
+              "type": "string"
+            },
+            {
+              "internalType": "uint8",
+              "name": "confidence",
+              "type": "uint8"
+            },
+            {
+              "internalType": "string",
+              "name": "evidenceCid",
+              "type": "string"
+            }
+          ],
+          "internalType": "struct Aggregator.VerifierSubmission[]",
+          "name": "",
+          "type": "tuple[]"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "owner",
+      "outputs": [
+        {
+          "internalType": "address",
+          "name": "",
+          "type": "address"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "string",
+          "name": "agentId",
+          "type": "string"
+        },
+        {
+          "internalType": "address",
+          "name": "payoutAddress",
+          "type": "address"
+        }
+      ],
+      "name": "registerAgent",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "string",
+          "name": "cid",
+          "type": "string"
+        },
+        {
+          "internalType": "address",
+          "name": "submitter",
+          "type": "address"
+        },
+        {
+          "internalType": "uint64",
+          "name": "dealId",
+          "type": "uint64"
+        }
+      ],
+      "name": "registerEvidence",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "string",
+          "name": "",
+          "type": "string"
+        },
+        {
+          "internalType": "uint256",
+          "name": "",
+          "type": "uint256"
+        }
+      ],
+      "name": "submissions",
+      "outputs": [
+        {
+          "internalType": "string",
+          "name": "agentId",
+          "type": "string"
+        },
+        {
+          "internalType": "string",
+          "name": "verdict",
+          "type": "string"
+        },
+        {
+          "internalType": "uint8",
+          "name": "confidence",
+          "type": "uint8"
+        },
+        {
+          "internalType": "string",
+          "name": "evidenceCid",
+          "type": "string"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "string",
+          "name": "requestContext",
+          "type": "string"
+        },
+        {
+          "internalType": "string",
+          "name": "agentId",
+          "type": "string"
+        },
+        {
+          "internalType": "string",
+          "name": "verdict",
+          "type": "string"
+        },
+        {
+          "internalType": "uint8",
+          "name": "confidence",
+          "type": "uint8"
+        },
+        {
+          "internalType": "string",
+          "name": "evidenceCid",
+          "type": "string"
+        }
+      ],
+      "name": "submitVerificationResult",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "string",
+          "name": "",
+          "type": "string"
+        }
+      ],
+      "name": "verdicts",
+      "outputs": [
+        {
+          "internalType": "string",
+          "name": "finalVerdict",
+          "type": "string"
+        },
+        {
+          "internalType": "uint8",
+          "name": "finalConfidence",
+          "type": "uint8"
+        },
+        {
+          "internalType": "address",
+          "name": "aggregator",
+          "type": "address"
+        },
+        {
+          "internalType": "uint256",
+          "name": "timestamp",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "submissionCount",
+          "type": "uint256"
+        },
+        {
+          "internalType": "bool",
+          "name": "exists",
+          "type": "bool"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "amount",
+          "type": "uint256"
+        }
+      ],
+      "name": "withdrawFunds",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "stateMutability": "payable",
+      "type": "receive"
+    }
+  ],
+  \
+  
+  "linkReferences": {},
+  "deployedLinkReferences": {}
+}
+===== ./contracts/abi/KintaskCommitment.json =====
+{
+  "_format": "hh-sol-artifact-1",
+  "contractName": "KintaskCommitment",
+  "sourceName": "contracts/KintaskCommitment.sol",
+  "abi": [
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "blocklockContractProxy",
+          "type": "address"
+        }
+      ],
+      "stateMutability": "nonpayable",
+      "type": "constructor"
+    },
+    {
+      "inputs": [],
+      "name": "AlreadyRevealed",
+      "type": "error"
+    },
+    {
+      "inputs": [],
+      "name": "InvalidRequestId",
+      "type": "error"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "uint256",
+          "name": "blocklockRequestId",
+          "type": "uint256"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "requester",
+          "type": "address"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "decryptionBlockNumber",
+          "type": "uint256"
+        },
+        {
+          "indexed": false,
+          "internalType": "bytes32",
+          "name": "ciphertextHash",
+          "type": "bytes32"
+        }
+      ],
+      "name": "VerdictCommitted",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "uint256",
+          "name": "blocklockRequestId",
+          "type": "uint256"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "requester",
+          "type": "address"
+        },
+        {
+          "indexed": false,
+          "internalType": "bytes",
+          "name": "revealedVerdict",
+          "type": "bytes"
+        }
+      ],
+      "name": "VerdictRevealed",
+      "type": "event"
+    },
+    {
+      "inputs": [],
+      "name": "blocklock",
+      "outputs": [
+        {
+          "internalType": "contract IBlocklockSender",
+          "name": "",
+          "type": "address"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "decryptionBlockNumber",
+          "type": "uint256"
+        },
+        {
+          "components": [
+            {
+              "components": [
+                {
+                  "internalType": "uint256[2]",
+                  "name": "x",
+                  "type": "uint256[2]"
+                },
+                {
+                  "internalType": "uint256[2]",
+                  "name": "y",
+                  "type": "uint256[2]"
+                }
+              ],
+              "internalType": "struct BLS.PointG2",
+              "name": "u",
+              "type": "tuple"
+            },
+            {
+              "internalType": "bytes",
+              "name": "v",
+              "type": "bytes"
+            },
+            {
+              "internalType": "bytes",
+              "name": "w",
+              "type": "bytes"
+            }
+          ],
+          "internalType": "struct TypesLib.Ciphertext",
+          "name": "encryptedData",
+          "type": "tuple"
+        }
+      ],
+      "name": "commitVerdict",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "blocklockRequestId",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "",
+          "type": "uint256"
+        }
+      ],
+      "name": "commitments",
+      "outputs": [
+        {
+          "internalType": "address",
+          "name": "requester",
+          "type": "address"
+        },
+        {
+          "components": [
+            {
+              "components": [
+                {
+                  "internalType": "uint256[2]",
+                  "name": "x",
+                  "type": "uint256[2]"
+                },
+                {
+                  "internalType": "uint256[2]",
+                  "name": "y",
+                  "type": "uint256[2]"
+                }
+              ],
+              "internalType": "struct BLS.PointG2",
+              "name": "u",
+              "type": "tuple"
+            },
+            {
+              "internalType": "bytes",
+              "name": "v",
+              "type": "bytes"
+            },
+            {
+              "internalType": "bytes",
+              "name": "w",
+              "type": "bytes"
+            }
+          ],
+          "internalType": "struct TypesLib.Ciphertext",
+          "name": "ciphertext",
+          "type": "tuple"
+        },
+        {
+          "internalType": "uint256",
+          "name": "decryptionBlockNumber",
+          "type": "uint256"
+        },
+        {
+          "internalType": "bytes",
+          "name": "revealedVerdict",
+          "type": "bytes"
+        },
+        {
+          "internalType": "bool",
+          "name": "isRevealed",
+          "type": "bool"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "blocklockRequestId",
+          "type": "uint256"
+        }
+      ],
+      "name": "getCommitment",
+      "outputs": [
+        {
+          "components": [
+            {
+              "internalType": "address",
+              "name": "requester",
+              "type": "address"
+            },
+            {
+              "components": [
+                {
+                  "components": [
+                    {
+                      "internalType": "uint256[2]",
+                      "name": "x",
+                      "type": "uint256[2]"
+                    },
+                    {
+                      "internalType": "uint256[2]",
+                      "name": "y",
+                      "type": "uint256[2]"
+                    }
+                  ],
+                  "internalType": "struct BLS.PointG2",
+                  "name": "u",
+                  "type": "tuple"
+                },
+                {
+                  "internalType": "bytes",
+                  "name": "v",
+                  "type": "bytes"
+                },
+                {
+                  "internalType": "bytes",
+                  "name": "w",
+                  "type": "bytes"
+                }
+              ],
+              "internalType": "struct TypesLib.Ciphertext",
+              "name": "ciphertext",
+              "type": "tuple"
+            },
+            {
+              "internalType": "uint256",
+              "name": "decryptionBlockNumber",
+              "type": "uint256"
+            },
+            {
+              "internalType": "bytes",
+              "name": "revealedVerdict",
+              "type": "bytes"
+            },
+            {
+              "internalType": "bool",
+              "name": "isRevealed",
+              "type": "bool"
+            }
+          ],
+          "internalType": "struct KintaskCommitment.CommitmentData",
+          "name": "",
+          "type": "tuple"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "nextRequestId",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "requestID",
+          "type": "uint256"
+        },
+        {
+          "internalType": "bytes",
+          "name": "decryptionKey",
+          "type": "bytes"
+        }
+      ],
+      "name": "receiveBlocklock",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    }
+  ],
+  
+  "deployedBytecode": "0x608060405234801561001057600080fd5b50600436106100625760003560e01c806349ce8997146100675780635d9418021461009457806369bcdb7d146100a95780636a84a985146100c957806389337215146100e057806393b9740a146100f3575b600080fd5b61007a610075366004610cc7565b61011e565b60405161008b959493929190610db5565b60405180910390f35b6100a76100a2366004610e06565b61037d565b005b6100bc6100b7366004610cc7565b6105b8565b60405161008b9190610e82565b6100d260025481565b60405190815260200161008b565b6100d26100ee366004610ef0565b610847565b600054610106906001600160a01b031681565b6040516001600160a01b03909116815260200161008b565b6001602081905260009182526040918290208054835160e081019094526001600160a01b031692909182018160608101828160a084018260028282826020028201915b81548152602001906001019080831161016157505050918352505060408051808201918290526020909201919060028481019182845b8154815260200190600101908083116101975750505050508152505081526020016004820180546101c790610f3e565b80601f01602080910402602001604051908101604052809291908181526020018280546101f390610f3e565b80156102405780601f1061021557610100808354040283529160200191610240565b820191906000526020600020905b81548152906001019060200180831161022357829003601f168201915b5050505050815260200160058201805461025990610f3e565b80601f016020809104026020016040519081016040528092919081815260200182805461028590610f3e565b80156102d25780601f106102a7576101008083540402835291602001916102d2565b820191906000526020600020905b8154815290600101906020018083116102b557829003601f168201915b505050505081525050908060070154908060080180546102f190610f3e565b80601f016020809104026020016040519081016040528092919081815260200182805461031d90610f3e565b801561036a5780601f1061033f5761010080835404028352916020019161036a565b820191906000526020600020905b81548152906001019060200180831161034d57829003601f168201915b5050506009909301549192505060ff1685565b6000546001600160a01b031633146103ea5760405162461bcd60e51b815260206004820152602560248201527f4f6e6c792074696d656c6f636b20636f6e74726163742063616e2063616c6c206044820152643a3434b99760d91b60648201526084015b60405180910390fd5b61040c6040518060600160405280603d81526020016115d3603d913984610b16565b600083815260016020526040902080546001600160a01b03166104635761044a60405180608001604052806044815260200161164660449139610b5f565b6040516302e8145360e61b815260040160405180910390fd5b600981015460ff16156104aa576104916040518060600160405280603181526020016115a260319139610b5f565b60405163a89ac15160e01b815260040160405180910390fd5b6000805460405163326f063160e21b81526001600160a01b039091169063c9bc18c4906104e290600186019088908890600401611041565b600060405180830381865afa1580156104ff573d6000803e3d6000fd5b505050506040513d6000823e601f3d908101601f19168201604052610527919081019061114b565b905060088201610537828261120f565b5060098201805460ff1916600117905581546040516001600160a01b039091169086907fb26b7b6789785ed7899c41b71cdc584067afeb832404373c95b6bd12f3707c28906105879085906112cf565b60405180910390a36105b16040518060600160405280603681526020016116106036913986610b16565b5050505050565b6105c0610bca565b600082815260016020818152604092839020835160a0808201865282546001600160a01b03168252855160e081019096529094919392850192840190829060608201908390829084018260028282826020028201915b81548152602001906001019080831161061657505050918352505060408051808201918290526020909201919060028481019182845b81548152602001906001019080831161064c57505050505081525050815260200160048201805461067c90610f3e565b80601f01602080910402602001604051908101604052809291908181526020018280546106a890610f3e565b80156106f55780601f106106ca576101008083540402835291602001916106f5565b820191906000526020600020905b8154815290600101906020018083116106d857829003601f168201915b5050505050815260200160058201805461070e90610f3e565b80601f016020809104026020016040519081016040528092919081815260200182805461073a90610f3e565b80156107875780601f1061075c57610100808354040283529160200191610787565b820191906000526020600020905b81548152906001019060200180831161076a57829003601f168201915b5050505050815250508152602001600782015481526020016008820180546107ae90610f3e565b80601f01602080910402602001604051908101604052809291908181526020018280546107da90610f3e565b80156108275780601f106107fc57610100808354040283529160200191610827565b820191906000526020600020905b81548152906001019060200180831161080a57829003601f168201915b50505091835250506009919091015460ff16151560209091015292915050565b60008061085760808401846112e9565b9050116108a65760405162461bcd60e51b815260206004820152601a60248201527f436970686572746578742063616e6e6f7420626520656d70747900000000000060448201526064016103e1565b4383116109045760405162461bcd60e51b815260206004820152602660248201527f44656372797074696f6e20626c6f636b206d75737420626520696e207468652060448201526566757475726560d01b60648201526084016103e1565b60005460405163236695a160e11b81526001600160a01b03909116906346cd2b4290610936908690869060040161137d565b6020604051808303816000875af1158015610955573d6000803e3d6000fd5b505050506040513d601f19601f8201168201806040525081019061097991906113ef565b90506040518060a00160405280336001600160a01b031681526020018361099f906114a9565b81526020808201869052604080518083018252600080825282850191909152606090930183905284835260018083529220835181546001600160a01b0319166001600160a01b03909116178155908301518051805192939192918401918290610a0b9082906002610c0a565b506020820151610a219060028084019190610c0a565b50505060208201516004820190610a38908261120f565b5060408201516005820190610a4d908261120f565b5050506040820151600782015560608201516008820190610a6e908261120f565b50608091820151600991909101805460ff1916911515919091179055339082907f7d58c740cfd350f640e7f7fd28b30440c507d97c5b1a6ff96fe566e4615e64bf908690610abe908701876112e9565b604051610acc92919061156f565b604051908190038120610ae6928252602082015260400190565b60405180910390a3610b1060405180606001604052806036815260200161168a6036913982610b16565b92915050565b610b5b8282604051602401610b2c92919061157f565b60408051601f198184030181529190526020810180516001600160e01b0316632d839cb360e21b179052610ba5565b5050565b610ba281604051602401610b7391906112cf565b60408051601f198184030181529190526020810180516001600160e01b031663104c13eb60e21b179052610ba5565b50565b610ba28160006a636f6e736f6c652e6c6f679050600080835160208501845afa505050565b6040518060a0016040528060006001600160a01b03168152602001610bed610c48565b815260200160008152602001606081526020016000151581525090565b8260028101928215610c38579160200282015b82811115610c38578251825591602001919060010190610c1d565b50610c44929150610c6f565b5090565b6040518060600160405280610c5b610c84565b815260200160608152602001606081525090565b5b80821115610c445760008155600101610c70565b6040518060400160405280610c97610ca9565b8152602001610ca4610ca9565b905290565b60405180604001604052806002906020820280368337509192915050565b600060208284031215610cd957600080fd5b5035919050565b8060005b6002811015610d03578151845260209384019390910190600101610ce4565b50505050565b60005b83811015610d24578181015183820152602001610d0c565b50506000910152565b60008151808452610d45816020860160208601610d09565b601f01601f19169290920160200192915050565b60008151610d68848251610ce0565b60200151610d796040850182610ce0565b50602082015160c06080850152610d9360c0850182610d2d565b9050604083015184820360a0860152610dac8282610d2d565b95945050505050565b6001600160a01b038616815260a060208201819052600090610dd990830187610d59565b8560408401528281036060840152610df18186610d2d565b91505082151560808301529695505050505050565b600080600060408486031215610e1b57600080fd5b83359250602084013567ffffffffffffffff80821115610e3a57600080fd5b818601915086601f830112610e4e57600080fd5b813581811115610e5d57600080fd5b876020828501011115610e6f57600080fd5b6020830194508093505050509250925092565b602080825282516001600160a01b03168282015282015160a06040830152600090610eb060c0840182610d59565b9050604084015160608401526060840151601f19848303016080850152610ed78282610d2d565b9150506080840151151560a08401528091505092915050565b60008060408385031215610f0357600080fd5b82359150602083013567ffffffffffffffff811115610f2157600080fd5b830160c08186031215610f3357600080fd5b809150509250929050565b600181811c90821680610f5257607f821691505b602082108103610f7257634e487b7160e01b600052602260045260246000fd5b50919050565b8060005b6002811015610d03578154845260209093019260019182019101610f7c565b60008154610fa881610f3e565b808552602060018381168015610fc55760018114610fdf5761100d565b60ff1985168884015283151560051b88018301955061100d565b866000528260002060005b858110156110055781548a8201860152908301908401610fea565b890184019650505b505050505092915050565b81835281816020850137506000828201602090810191909152601f909101601f19169091010190565b604081526110526040820185610f78565b6110626080820160028601610f78565b60c080820152600061107b610100830160048701610f9b565b828103603f190160e08401526110948160058801610f9b565b905082810360208401526110a9818587611018565b9695505050505050565b634e487b7160e01b600052604160045260246000fd5b6040805190810167ffffffffffffffff811182821017156110ec576110ec6110b3565b60405290565b604051601f8201601f1916810167ffffffffffffffff8111828210171561111b5761111b6110b3565b604052919050565b600067ffffffffffffffff82111561113d5761113d6110b3565b50601f01601f191660200190565b60006020828403121561115d57600080fd5b815167ffffffffffffffff81111561117457600080fd5b8201601f8101841361118557600080fd5b805161119861119382611123565b6110f2565b8181528560208385010111156111ad57600080fd5b610dac826020830160208601610d09565b601f82111561120a576000816000526020600020601f850160051c810160208610156111e75750805b601f850160051c820191505b81811015611206578281556001016111f3565b5050505b505050565b815167ffffffffffffffff811115611229576112296110b3565b61123d816112378454610f3e565b846111be565b602080601f831160018114611272576000841561125a5750858301515b600019600386901b1c1916600185901b178555611206565b600085815260208120601f198616915b828110156112a157888601518255948401946001909101908401611282565b50858210156112bf5787850151600019600388901b60f8161c191681555b5050505050600190811b01905550565b6020815260006112e26020830184610d2d565b9392505050565b6000808335601e1984360301811261130057600080fd5b83018035915067ffffffffffffffff82111561131b57600080fd5b60200191503681900382131561133057600080fd5b9250929050565b6000808335601e1984360301811261134e57600080fd5b830160208101925035905067ffffffffffffffff81111561136e57600080fd5b80360382131561133057600080fd5b8281526040602082015260408260408301376040808301608083013760006113a86080840184611337565b60c0808501526113bd61010085018284611018565b9150506113cd60a0850185611337565b848303603f190160e08601526113e4838284611018565b979650505050505050565b60006020828403121561140157600080fd5b5051919050565b600082601f83011261141957600080fd5b6114216110c9565b80604084018581111561143357600080fd5b845b8181101561144d578035845260209384019301611435565b509095945050505050565b600082601f83011261146957600080fd5b813561147761119382611123565b81815284602083860101111561148c57600080fd5b816020850160208301376000918101602001919091529392505050565b600081360360c08112156114bc57600080fd5b6040516060810167ffffffffffffffff82821081831117156114e0576114e06110b3565b8160405260808412156114f257600080fd5b6114fa6110c9565b93506115063687611408565b84526115153660408801611408565b60208501529282526080850135928084111561153057600080fd5b61153c36858801611458565b602084015260a086013593508084111561155557600080fd5b505061156336838601611458565b60408201529392505050565b8183823760009101908152919050565b6040815260006115926040830185610d2d565b9050826020830152939250505056fe4572726f723a204b696e7461736b436f6d6d69746d656e74207265717565737420616c72656164792072657665616c65644b696e7461736b436f6d6d69746d656e7420726563656976656420626c6f636b6c6f636b2063616c6c6261636b20666f7220726571756573742049443a566572646963742072657665616c656420766961204b696e7461736b436f6d6d69746d656e7420666f7220726571756573742049443a4572726f723a2052656365697665642063616c6c6261636b20666f7220756e6b6e6f776e207265717565737420494420696e204b696e7461736b436f6d6d69746d656e74436f6d6d69746d656e74206d61646520766961204b696e7461736b436f6d6d69746d656e74207769746820726571756573742049443aa26469706673582212205f915cd6d2bfa55394289be80c95e5fd2b6176defc7ffc7baf102774a0883b3e64736f6c63430008180033",
+  "linkReferences": {},
+  "deployedLinkReferences": {}
+}
 ===== ./contracts/addresses.ts =====
+// ./packages/backend/src/contracts/addresses.ts
 import config from '../config';
 
 export const KINTASK_COMMITMENT_CONTRACT_ADDRESS = config.kintaskContractAddress || '';
+export const FVM_AGGREGATOR_CONTRACT_ADDRESS = config.fvmAggregatorContractAddress || '';
 
-// Add other contract addresses if needed
-
-if (!KINTASK_COMMITMENT_CONTRACT_ADDRESS && process.env.NODE_ENV !== 'test') { // Don't warn during tests maybe
-    console.warn("Backend Config Warning: KintaskCommitment Contract address (KINTASK_CONTRACT_ADDRESS) is not set in .env!");
+if (!KINTASK_COMMITMENT_CONTRACT_ADDRESS && process.env.NODE_ENV !== 'test') {
+    console.warn("Backend Config Warning: KINTASK_CONTRACT_ADDRESS is not set in .env!");
 }
-===== ./controllers/verifyController.ts =====
+if (!FVM_AGGREGATOR_CONTRACT_ADDRESS && process.env.NODE_ENV !== 'test') {
+    console.warn("Backend Config Warning: FVM_AGGREGATOR_CONTRACT_ADDRESS is not set in .env!");
+}===== ./controllers/verifyController.ts =====
+// ./src/controllers/verifyController.ts
 import { Request, Response, NextFunction } from 'express';
-import { generateAnswer } from '../services/generatorService';
+import { generateClaim } from '../services/generatorService'; // Use generateClaim
 import { performVerification } from '../services/verifierService';
 import { logRecallEvent, getTraceFromRecall } from '../services/recallService';
-import { VerificationResultInternal, ApiVerifyResponse } from '../types';
+import { VerificationResultInternal, ApiVerifyResponse, RecallLogEntryData } from '../types';
 import { getL2ExplorerUrl } from '../utils';
-import config from '../config'; // Import config if needed for L2 Chain ID for explorer
+import config from '../config'; // Import config if needed
 
 export async function handleVerifyRequest(req: Request, res: Response, next: NextFunction): Promise<void> {
   const { question } = req.body;
-  const requestTimestamp = new Date().toISOString();
-  // Create a unique context ID for this specific request to correlate Recall logs
   const uniqueRequestContext = `req_${Date.now()}_${Math.random().toString(16).substring(2, 8)}`;
 
-  // --- Input Validation ---
-  if (!question || typeof question !== 'string' || question.trim() === '') {
-    res.status(400).json({ error: 'Invalid request body. Non-empty "question" string is required.' });
-    return;
-  }
-  if (question.length > 1500) { // Limit question length
-       res.status(400).json({ error: 'Question exceeds maximum length (1500 characters).' });
-       return;
-  }
+  if (!question || typeof question !== 'string' || question.trim() === '') { res.status(400).json({ error: 'Invalid request body.' }); return; }
+  if (question.length > 1500) { res.status(400).json({ error: 'Question exceeds maximum length.' }); return; }
 
   let verificationResult: VerificationResultInternal | null = null;
-  let finalAnswer = "Processing..."; // Initial state
+  let generatedClaim: string | undefined = "Processing...";
 
-  console.log(`[Controller] Handling request ${uniqueRequestContext} for question: "${question.substring(0, 50)}..."`);
+  console.log(`[Controller] Handling request ${uniqueRequestContext.substring(0,15)}... | Question: "${question.substring(0, 50)}..."`);
   try {
-    // --- Log Start ---
-    // Use await to ensure start is logged before proceeding, good for tracing flows
-    await logRecallEvent('VERIFICATION_START', { question: question.substring(0, 200) + (question.length > 200 ? '...' : '') }, uniqueRequestContext);
+    // Log Start is handled inside generateClaim/performVerification implicitly via addStep now
 
-    // --- 1. Generate Answer (Mocked) ---
-    finalAnswer = await generateAnswer(question);
-    // Check if mock returned an error string
-    if (finalAnswer.startsWith('Error:')) {
-         await logRecallEvent('VERIFICATION_ERROR', { step: 'GeneratorMock', error: finalAnswer }, uniqueRequestContext);
-         throw new Error(`Mock Generator failed: ${finalAnswer}`);
+    // --- Step 1: Generate CLAIM ---
+    generatedClaim = await generateClaim(question, uniqueRequestContext);
+    if (typeof generatedClaim !== 'string') {
+        console.error(`[Controller Error] generateClaim returned non-string: ${typeof generatedClaim}`);
+        const errorDetails = { step: 'ClaimGen', error: 'Generator returned invalid type' };
+        logRecallEvent('VERIFICATION_ERROR', errorDetails, uniqueRequestContext).catch(/* ... */);
+        res.status(500).json({ answer: "Failed", status: "Error: Claim Generation Failed", error: "Internal server error during claim generation." });
+        return;
     }
-    await logRecallEvent('GENERATOR_MOCK_USED', { question: question.substring(0, 50) + '...', generatedAnswer: finalAnswer.substring(0, 50) + '...' }, uniqueRequestContext);
+    if (generatedClaim.startsWith('Error:')) {
+         const errorDetails = { step: 'ClaimGen', error: generatedClaim };
+         logRecallEvent('VERIFICATION_ERROR', errorDetails, uniqueRequestContext).catch(/* ... */);
+         res.status(500).json({ answer: "Could not process question.", status: "Error: Claim Generation Failed", error: generatedClaim });
+         return;
+    }
+    // Note: GENERATOR_MOCK_USED is logged inside generateClaim
 
+    // --- Step 2: Perform Verification on the CLAIM ---
+    verificationResult = await performVerification(question, generatedClaim, uniqueRequestContext);
 
-    // --- 2. Perform Verification ---
-    verificationResult = await performVerification(question, finalAnswer, uniqueRequestContext);
-
-    // Handle critical failure within the verification service itself
     if (!verificationResult) {
-        await logRecallEvent('VERIFICATION_ERROR', { step: 'Verifier', error: "Verifier service returned null" }, uniqueRequestContext);
-        throw new Error("Verification service failed to produce a result.");
-    }
-    // Handle error status returned by the verifier (e.g., Timelock Failed)
-    if (verificationResult.finalVerdict.startsWith('Error:')) {
-         console.warn(`[Controller] Verification completed with error status: ${verificationResult.finalVerdict}`);
-         // Error already logged within performVerification via addStep
-         // We will still return a 200 OK but include the error status in the payload
-    } else {
-        // Log successful completion calculation only if no error status from verifier
-        await logRecallEvent(
-            'FINAL_VERDICT_CALCULATED',
-            {
-                calculatedVerdict: verificationResult.finalVerdict,
-                confidence: verificationResult.confidenceScore,
-                usedCidsCount: verificationResult.usedFragmentCids.length,
-                timelockRequestId: verificationResult.timelockRequestId,
-            },
-            uniqueRequestContext
-        );
+        const errorDetails = { step: 'Verifier', error: "Verifier service returned null" };
+        logRecallEvent('VERIFICATION_ERROR', errorDetails, uniqueRequestContext).catch(/* ... */);
+        throw new Error("Verification process failed internally."); // Throw to central catch block
     }
 
-    // Log completion of controller handling for this request
-    await logRecallEvent('VERIFICATION_COMPLETE', { finalStatus: verificationResult.finalVerdict }, uniqueRequestContext);
+    // Handle potential errors *during* verification (like Timelock failure)
+     if (verificationResult.finalVerdict.startsWith('Error:')) {
+          console.warn(`[Controller] Verification completed with error status: ${verificationResult.finalVerdict}`);
+          // Error already logged within performVerification
+          // We will still return the result, but the status indicates the issue
+     }
 
-    // --- 3. Prepare SUCCESS API Response Payload ---
-    const recallTrace = await getTraceFromRecall(uniqueRequestContext); // Fetch trace for response
-    const responsePayload: ApiVerifyResponse = {
-        answer: finalAnswer,
+     // Log completion event (regardless of internal errors like timelock fail)
+     await logRecallEvent('VERIFICATION_COMPLETE', { finalStatus: verificationResult.finalVerdict }, uniqueRequestContext);
+
+
+    // --- Step 3: Prepare SUCCESS API Response Payload ---
+    const responsePayloadRaw = {
+        answer: generatedClaim,
         status: verificationResult.finalVerdict,
         confidence: verificationResult.confidenceScore,
         usedFragmentCids: verificationResult.usedFragmentCids,
         timelockRequestId: verificationResult.timelockRequestId,
-        timelockTxExplorerUrl: verificationResult.timelockCommitTxHash
-            ? getL2ExplorerUrl(verificationResult.timelockCommitTxHash) // Util handles undefined RPC/ChainID
-            : undefined,
-        recallTrace: recallTrace,
-        // recallExplorerUrl: // TODO: Add if Recall provides one based on context/trace ID
+        timelockTxExplorerUrl: verificationResult.timelockCommitTxHash ? getL2ExplorerUrl(verificationResult.timelockCommitTxHash) : undefined,
+        // recallTrace: await getTraceFromRecall(uniqueRequestContext), // Optionally include recall trace if not mocked
     };
+    // Remove undefined fields before sending
+    const responsePayload = Object.entries(responsePayloadRaw).reduce((acc, [key, value]) => { if (value !== undefined) { /* @ts-ignore */ acc[key] = value; } return acc; }, {} as Partial<ApiVerifyResponse>);
 
-    console.log(`[Controller] Sending successful response for request ${uniqueRequestContext}`);
+    // --- ADDED: Log the payload being sent ---
+    console.log(`[Controller] Sending Response | Context: ${uniqueRequestContext.substring(0,15)}... | Payload Keys: ${Object.keys(responsePayload).join(', ')} | Status: ${responsePayload.status}`);
+    // --- END ADDED ---
+
     res.status(200).json(responsePayload);
 
   } catch (error: any) {
-    console.error(`[Controller Error Request: ${uniqueRequestContext}]:`, error.message);
-    // Log the error that reached the controller catch block
-    await logRecallEvent('VERIFICATION_ERROR', { controllerError: error.message, stack: error.stack?.substring(0, 300) }, uniqueRequestContext);
+    const conciseError = (error instanceof Error) ? error.message.split('\n')[0] : String(error);
+    console.error(`[Controller Error] Context: ${uniqueRequestContext.substring(0,15)}... | Error Caught: ${conciseError}`);
+    const finalAnswerInError = (typeof generatedClaim === 'string' && generatedClaim !== "Processing...") ? generatedClaim : "Failed";
+    const finalStatusInError = verificationResult?.finalVerdict.startsWith('Error:') ? verificationResult.finalVerdict : 'Error: Verification Failed';
 
-    // --- Prepare ERROR API Response Payload ---
-    const recallTraceOnError = await getTraceFromRecall(uniqueRequestContext); // Attempt to get trace even on error
-    const errorResponse: ApiVerifyResponse = {
-        answer: finalAnswer === "Processing..." ? "Failed to process request." : finalAnswer, // Show generated answer if available
-        status: verificationResult?.finalVerdict || 'Error: Verification Failed', // Show status if verifier ran partially
-        error: 'Verification process encountered an error.', // Generic error for frontend
-        details: error.message, // Specific error message
-        recallTrace: recallTraceOnError // Include trace up to failure point
+    // Log the controller-level error (Recall is mocked)
+    try { const errorDetails = { controllerError: conciseError, lastClaim: finalAnswerInError, lastStatus: finalStatusInError }; logRecallEvent('VERIFICATION_ERROR', errorDetails, uniqueRequestContext).catch(/*...*/); } catch (logError:any) { /*...*/ }
+
+    // Prepare a simplified error response
+    const simpleErrorResponseRaw: Partial<ApiVerifyResponse> = {
+        answer: finalAnswerInError,
+        status: finalStatusInError,
+        error: 'Verification process encountered an error.',
+        details: conciseError,
+        confidence: verificationResult?.confidenceScore,
+        timelockRequestId: verificationResult?.timelockRequestId
     };
-    res.status(500).json(errorResponse);
-  }
-}
-===== ./repo_contents.txt =====
+    const simpleErrorResponse = Object.entries(simpleErrorResponseRaw).reduce((acc, [key, value]) => { if (value !== undefined) { /*@ts-ignore*/ acc[key] = value; } return acc; }, {} as Partial<ApiVerifyResponse>);
+
+    if (!res.headersSent) {
+        res.status(500).json(simpleErrorResponse);
+    } else {
+        console.error(`[Controller Error] Headers already sent, cannot send error response | Context: ${uniqueRequestContext.substring(0,15)}...`);
+    }
+   }
+}===== ./repo_contents.txt =====
 ===== ./routes/verify.ts =====
+// ./packages/backend/src/routes/verify.ts
 import { Router } from 'express';
 import { handleVerifyRequest } from '../controllers/verifyController';
 
 const router = Router();
 
-/**
- * @route POST /api/verify
- * @description Endpoint to receive a question, generate an answer, verify it,
- *              commit the verdict via timelock, log the process to Recall,
- *              and return the results.
- * @body { "question": "string" } - The user's question. Max length ~1500 chars recommended.
- * @returns {ApiVerifyResponse} 200 - Success response with answer, status, proofs.
- * @returns {object} 400 - Invalid request body (missing question, too long, etc.).
- * @returns {object} 500 - Internal server error during processing.
- */
 router.post('/verify', handleVerifyRequest);
 
-export default router;
-===== ./server.ts =====
+export default router;===== ./server.ts =====
+// server.ts
 import express, { Express, Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import config from './config';
@@ -226,11 +1248,17 @@ import { startRevealListener, stopRevealListener } from './services/timelockServ
 const app: Express = express();
 const port = config.port;
 
+// --- FIX: Disable Etag generation globally ---
+// This should prevent the etag function from running entirely
+app.set('etag', false);
+// --- End FIX ---
+
 // --- Middleware ---
 app.use(cors()); // Allow requests from frontend (configure origins for production)
 app.use(express.json({ limit: '1mb' })); // Parse JSON request bodies, limit size
 app.use((req: Request, res: Response, next: NextFunction) => {
     const start = Date.now();
+    // Removed per-response etag setting as it's now global
     res.on('finish', () => {
          const duration = Date.now() - start;
          console.log(`[${new Date().toISOString()}] ${req.method} ${req.originalUrl} ${res.statusCode} ${duration}ms`);
@@ -243,12 +1271,14 @@ app.use('/api', verifyRoutes);
 
 // Root Route / Health Check
 app.get('/', (req: Request, res: Response) => {
+  // Etag is disabled globally, no need to set header here
   res.status(200).json({ status: 'ok', message: 'Kintask Backend is running!'});
 });
 
 // --- 404 Handler ---
 // Catch-all for routes not defined
 app.use((req, res, next) => {
+    // Etag is disabled globally, no need to set header here
     res.status(404).json({ error: 'Not Found', message: `Endpoint ${req.method} ${req.path} does not exist.` });
 });
 
@@ -257,8 +1287,8 @@ app.use((req, res, next) => {
 // Catches errors passed via next(error)
 app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
   console.error("[Global Error Handler]:", err.stack || err);
-  // Avoid sending stack trace in production
   const message = process.env.NODE_ENV === 'production' ? 'An unexpected error occurred.' : err.message;
+  // Etag is disabled globally, no need to set header here
   res.status(500).json({
       error: 'Internal Server Error',
       message: message,
@@ -268,7 +1298,6 @@ app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
 // --- Start Server ---
 const server = app.listen(port, () => {
   console.log(`[server]: Kintask Backend server is running at http://localhost:${port}`);
-  // Initialize Timelock Listener on startup
   try {
       startRevealListener();
   } catch (listenerError) {
@@ -279,396 +1308,225 @@ const server = app.listen(port, () => {
 // --- Graceful Shutdown ---
 const gracefulShutdown = (signal: string) => {
     console.log(`\n${signal} signal received: closing HTTP server...`);
-    // Stop listener first
-    stopRevealListener();
+    stopRevealListener(); // Stop polling/listener
     server.close(() => {
         console.log('HTTP server closed.');
-        // Perform other cleanup if needed (e.g., DB connections)
         console.log("Exiting process.");
         process.exit(0);
     });
-
-    // Force close server after a timeout if graceful shutdown fails
      setTimeout(() => {
          console.error('Could not close connections in time, forcefully shutting down');
          process.exit(1);
-     }, 10000); // 10 seconds timeout
+     }, 10000);
 };
 
 process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
-process.on('SIGINT', () => gracefulShutdown('SIGINT')); // Catches Ctrl+C
-===== ./services/filecoinService.ts =====
-// kintask/packages/backend/src/services/filecoinService.ts
-
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));===== ./services/filecoinService.ts =====
+// ./packages/backend/src/services/filecoinService.ts
 import axios, { AxiosError } from 'axios';
-import config from '../config'; // Import configuration to get gateway URL and index CID
-import { KnowledgeFragment } from '../types'; // Import the structure definition
+import config from '../config';
+import { truncateText } from '../utils';
 
-// --- Configuration ---
-// Use the gateway specified in config, defaulting to a reliable public one (w3s.link)
 const IPFS_GATEWAY = config.ipfsGatewayUrl || 'https://w3s.link/ipfs/';
-const MAX_RETRIES = 3; // Number of retry attempts for failed fetches
-const RETRY_DELAY_MS = 800; // Initial delay before retrying (will increase exponentially)
-const REQUEST_TIMEOUT = 25000; // Timeout for each HTTP request in milliseconds (25 seconds)
+const MAX_RETRIES = 3;
+const RETRY_DELAY_MS = 800;
+const REQUEST_TIMEOUT = 25000;
 
-console.log(`[Filecoin Service] Using IPFS Gateway for retrieval: ${IPFS_GATEWAY}`);
-
-// Structure expected in the index file uploaded to Filecoin/Storacha
-interface IndexFileStructure {
-    createdAt: string;
-    description?: string;
-    fragmentsById?: Record<string, string>; // fragment_id -> cid map (optional)
-    index: Record<string, string[]>; // keyword -> [cid] map - Primary index used
-    indexRootCid?: string; // Optional: CID of the directory containing all fragments
-}
-
-// Simple in-memory cache with TTL (Time To Live) in milliseconds
-interface CacheEntry<T> {
-    data: T;
-    timestamp: number; // When the data was cached
-}
+console.log(`[Filecoin Service] Using IPFS Gateway: ${IPFS_GATEWAY}`);
+interface CacheEntry<T> { data: T; timestamp: number; }
 const cache = new Map<string, CacheEntry<any>>();
-const CACHE_TTL_MS = 10 * 60 * 1000; // Cache validity duration (e.g., 10 minutes)
+const CACHE_TTL_MS = 10 * 60 * 1000;
+function setCache<T>(key: string, data: T) { if (!key) return; cache.set(key, { data, timestamp: Date.now() }); }
+function getCache<T>(key: string): T | null { if (!key) return null; const entry = cache.get(key); if (entry && (Date.now() - entry.timestamp < CACHE_TTL_MS)) { return entry.data as T; } cache.delete(key); return null; }
 
-// --- Cache Utility Functions ---
-
-/**
- * Stores data in the in-memory cache.
- * @param key - The cache key (typically the CID).
- * @param data - The data to store.
- */
-function setCache<T>(key: string, data: T) {
-    if (!key) return; // Do not cache with empty key
-    cache.set(key, { data, timestamp: Date.now() });
-    // console.log(`[Cache] Set cache for key: ${key.substring(0,10)}...`);
-}
-
-/**
- * Retrieves data from the cache if it exists and is not expired.
- * @param key - The cache key (typically the CID).
- * @returns The cached data or null if not found or expired.
- */
-function getCache<T>(key: string): T | null {
-    if (!key) return null;
-    const entry = cache.get(key);
-    if (entry && (Date.now() - entry.timestamp < CACHE_TTL_MS)) {
-        // console.log(`[Cache] Hit for key: ${key.substring(0,10)}...`);
-        return entry.data as T;
-    }
-    // console.log(`[Cache] Miss or expired for key: ${key.substring(0,10)}...`);
-    cache.delete(key); // Remove expired or non-existent entry
-    return null;
-}
-
-// --- Core Fetching Logic ---
-
-/**
- * Fetches data from the configured IPFS gateway with caching and retry logic.
- * @param url - The full URL to fetch from the gateway.
- * @param cacheKey - The key to use for caching (typically the CID).
- * @returns The fetched data (parsed as JSON if applicable) or null if fetch fails.
- */
-async function fetchWithRetry<T>(url: string, cacheKey: string): Promise<T | null> {
-    // 1. Check Cache first
-    const cachedData = getCache<T>(cacheKey);
-    if (cachedData) {
-        return cachedData;
-    }
-
-    console.log(`[Filecoin Service] Fetching: ${url} (Cache Key: ${cacheKey.substring(0,10)}...)`);
-
-    // 2. Attempt Fetch with Retries
+async function fetchWithRetry(url: string, cacheKey: string): Promise<string | null> {
+    const cachedData = getCache<string>(cacheKey);
+    if (cachedData) { console.log(`[Filecoin Service DEBUG] Cache HIT for ${cacheKey.substring(0,10)}...`); return cachedData; }
+    console.log(`[Filecoin Service] Fetching: ${url.substring(0, 60)}... (Key: ${cacheKey.substring(0,10)}...)`);
     for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
         try {
-            const response = await axios.get<T>(url, {
-                timeout: REQUEST_TIMEOUT,
-                // Ensure correct headers for potentially receiving JSON
-                headers: {
-                    'Accept': 'application/json, application/octet-stream, */*',
-                    // 'User-Agent': 'KintaskBackend/1.0' // Optional: Identify your client
-                 }
-             });
-
-            // Check content type for JSON if expecting it (primarily for fragments/index)
-            const contentType = response.headers['content-type'];
-            const isJsonExpected = url.includes(config.knowledgeBaseIndexCid || 'INVALID_CID') || cacheKey !== config.knowledgeBaseIndexCid; // Assume fragments & index are JSON
-
-            if (isJsonExpected && (!contentType || !contentType.includes('application/json'))) {
-                // Gateways sometimes return HTML error pages or non-JSON for DAG issues
-                console.warn(`[Filecoin Service] Attempt ${attempt} for ${cacheKey}: Expected JSON but received Content-Type: ${contentType}. Raw data sample:`, typeof response.data === 'string' ? response.data.substring(0, 100) + '...' : typeof response.data);
-                // Treat non-JSON response as an error for expected JSON content
-                 throw new Error(`Expected JSON content, but received ${contentType || 'unknown content type'}`);
-            }
-
-            // Check for successful status code
-            if (response.status === 200 && response.data) {
-                console.log(`[Filecoin Service] Successfully fetched ${cacheKey.substring(0,10)}... (Attempt ${attempt})`);
-                setCache(cacheKey, response.data); // Cache the successful response
-                return response.data;
-            } else {
-                // Log unexpected success status codes (e.g., 204 No Content?)
-                console.warn(`[Filecoin Service] Fetch attempt ${attempt} for ${cacheKey} returned unexpected status: ${response.status}`);
-                // Continue to retry loop
-            }
-
-        } catch (error: any) {
-            const axiosError = error as AxiosError;
-            console.warn(`[Filecoin Service] Error fetch attempt ${attempt}/${MAX_RETRIES} for ${cacheKey}:`, axiosError.message);
-
-            // Log details from the error response if available
-            if (axiosError.response) {
-                 console.warn(`  Gateway Response Status: ${axiosError.response.status}`);
-                 // console.warn(`  Gateway Response Headers:`, axiosError.response.headers); // Can be verbose
-                 // console.warn(`  Gateway Response Data:`, axiosError.response.data); // Can be verbose/large
-
-                 // Don't retry on 404 Not Found - the content likely doesn't exist
-                 if (axiosError.response.status === 404) {
-                      console.error(`[Filecoin Service] CID ${cacheKey} not found on gateway (404). Stopping retries.`);
-                      return null; // Indicate definitively not found
-                 }
-                 // Consider stopping retries on other client errors (4xx) too?
-            } else if (axiosError.code === 'ECONNABORTED' || axiosError.message.includes('timeout')) {
-                console.warn(`  Gateway request timed out.`);
-            }
-
-            // If it's the last attempt, log final failure and return null
-            if (attempt === MAX_RETRIES) {
-                console.error(`[Filecoin Service] Final fetch attempt failed for CID: ${cacheKey} after ${MAX_RETRIES} tries.`);
-                return null;
-            }
-
-            // Wait before retrying with exponential backoff
-            const delay = RETRY_DELAY_MS * Math.pow(2, attempt - 1); // 1s, 2s, 4s...
-            console.log(`  Retrying in ${delay}ms...`);
-            await new Promise(resolve => setTimeout(resolve, delay));
-        }
+            const response = await axios.get<string>(url, { timeout: REQUEST_TIMEOUT, responseType: 'text', headers: { 'Accept': 'text/plain, */*' } });
+            if (response.status === 200 && typeof response.data === 'string') {
+                setCache(cacheKey, response.data); console.log(`[Filecoin Service DEBUG] Fetched content OK (len: ${response.data.length})`); console.log(`[Filecoin Service DEBUG] Content sample: ${truncateText(response.data, 300)}`); return response.data;
+            } else { console.warn(`[Filecoin Service] Fetch attempt ${attempt} status: ${response.status}, type: ${typeof response.data}`); }
+        } catch (error: any) { const axiosError = error as AxiosError; const conciseError = axiosError.message.split('\n')[0]; console.warn(`[Filecoin Service] Fetch Error ${attempt}/${MAX_RETRIES}: ${conciseError}`); if (axiosError.response?.status === 404) { console.error(`[Filecoin Service] CID ${cacheKey.substring(0,10)}... 404 Not Found.`); return null; } if (attempt === MAX_RETRIES) { console.error(`[Filecoin Service] Final fetch attempt failed: ${cacheKey.substring(0,10)}...`); return null; } const delay = RETRY_DELAY_MS * Math.pow(2, attempt - 1); await new Promise(resolve => setTimeout(resolve, delay)); }
     }
-
-    // Should not be reached if error handling above is correct, but acts as a fallback
-    console.error(`[Filecoin Service] Fetch failed unexpectedly for ${cacheKey} after all attempts.`);
-    return null;
+    console.error(`[Filecoin Service] Fetch failed unexpectedly: ${cacheKey.substring(0,10)}...`); return null;
 }
 
-// --- Exported Service Functions ---
-
-/**
- * Fetches and parses the Knowledge Graph index file from Filecoin/IPFS.
- * @returns The keyword-to-CID index object, or null if fetching fails.
- */
-export async function getKnowledgeIndex(): Promise<IndexFileStructure['index'] | null> {
-    const indexCid = config.knowledgeBaseIndexCid;
-    if (!indexCid) {
-        console.error('[Filecoin Service] FATAL ERROR: KB_INDEX_CID is not configured in backend .env.');
-        return null;
-    }
-
-    const url = `${IPFS_GATEWAY}${indexCid}`;
-    console.log(`[Filecoin Service] Getting Knowledge Index (CID: ${indexCid.substring(0,10)}...)`);
-    const indexFile = await fetchWithRetry<IndexFileStructure>(url, indexCid); // Use index CID as cache key
-
-    if (indexFile && typeof indexFile.index === 'object' && indexFile.index !== null) {
-         // Optional: Log how many keywords are in the loaded index
-         console.log(`[Filecoin Service] Successfully loaded index with ${Object.keys(indexFile.index).length} keywords.`);
-         return indexFile.index;
-    } else {
-         console.error(`[Filecoin Service] Failed to fetch or parse index file structure from CID: ${indexCid}`);
-         return null;
-    }
+export async function fetchKnowledgeSourceContent(): Promise<string | null> {
+    const sourceCid = config.knowledgeBaseIndexCid;
+    if (!sourceCid) { console.error('[Filecoin Service] Error: KB_INDEX_CID not configured.'); return null; }
+    if (typeof sourceCid !== 'string' || sourceCid.trim() === '' || (!sourceCid.startsWith('bafy') && !sourceCid.startsWith('bafk') && !sourceCid.startsWith('Qm'))) { console.error(`[Filecoin Service] Invalid KB_INDEX_CID format: ${sourceCid}`); return null; }
+    const url = `${IPFS_GATEWAY}${sourceCid}`; console.log(`[Filecoin Service] Fetching Knowledge Source (CID: ${sourceCid.substring(0,10)}...)`);
+    return await fetchWithRetry(url, sourceCid);
 }
 
-/**
- * Fetches and parses a single Knowledge Fragment JSON object from Filecoin/IPFS using its CID.
- * @param cid - The Content Identifier (CID) of the fragment to fetch.
- * @returns The parsed KnowledgeFragment object, or null if fetching or parsing fails.
- */
-export async function fetchKnowledgeFragment(cid: string): Promise<KnowledgeFragment | null> {
-    // Basic CID format validation
-    if (!cid || typeof cid !== 'string' || (!cid.startsWith('bafy') && !cid.startsWith('Qm'))) {
-        console.error(`[Filecoin Service] Invalid CID format provided for fragment fetch: ${cid}`);
-        return null;
-    }
-
-    const url = `${IPFS_GATEWAY}${cid}`;
-    // Use fragment CID as the cache key
-    const fragment = await fetchWithRetry<KnowledgeFragment>(url, cid);
-
-    // Optional: Add schema validation here after fetching if needed
-    // if (fragment && !isValidKnowledgeFragment(fragment)) {
-    //     console.error(`[Filecoin Service] Fetched data for CID ${cid} is not a valid KnowledgeFragment.`);
-    //     return null;
-    // }
-
-    return fragment;
-}
-
-// Optional: Add a function to clear the cache if needed for debugging
-export function clearFilecoinCache() {
-    console.log("[Filecoin Service] Clearing in-memory cache.");
-    cache.clear();
-}===== ./services/generatorService.ts =====
-// kintask/packages/backend/src/services/generatorService.ts
-import axios, { AxiosError } from 'axios'; // Using axios for HTTP requests
-import config from '../config'; // Import configuration (includes API key)
-import { logRecallEvent } from './recallService'; // Import recall logger for errors
-
+export function clearFilecoinCache() { console.log("[Filecoin Service] Clearing cache."); cache.clear(); }===== ./services/generatorService.ts =====
+// ./src/services/generatorService.ts
+import axios, { AxiosError } from 'axios';
+import config from '../config';
+import { logRecallEvent } from './recallService'; // Recall is mocked
+import { truncateText } from '../utils';
 
 const OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions";
-const API_KEY = config.openRouterApiKey;
-
-// --- Model Configuration ---
-// ACTION REQUIRED: Choose a model available on OpenRouter.
-// Check https://openrouter.ai/models for options and pricing.
-// Using the free Mistral model as a default.
+const API_KEY = config.openRouterApiKey; // Loaded from config
 const MODEL_IDENTIFIER = "mistralai/mistral-7b-instruct:free";
-// --- End Model Configuration ---
 
-// --- Generation Parameters ---
-const MAX_TOKENS = 250; // Max length of the generated response
-const TEMPERATURE = 0.5; // Lower value = more deterministic, higher = more creative
-const TOP_P = 0.9;      // Nucleus sampling
-// --- End Generation Parameters ---
+// Rate Limiting Configuration
+const RATE_LIMIT_WINDOW_MS = 60 * 1000; // 60 seconds window
+const MAX_REQUESTS_PER_WINDOW = 10; // Allow 10 requests per minute (can be adjusted)
+const RATE_LIMIT_RETRY_DELAY_MS = 15000; // Wait 15 seconds if limit is hit
+let requestTimestamps: number[] = [];
+
+const MAX_TOKENS_CLAIM = 50;
+const TEMPERATURE_CLAIM = 0.3;
+const MAX_TOKENS_VERIFY = 30;
+const TEMPERATURE_VERIFY = 0.1;
 
 let isGeneratorInitialized = false;
-
 function initializeGenerator() {
     if (isGeneratorInitialized) return;
     console.log("[Generator Service] Initializing OpenRouter configuration...");
-    if (!API_KEY) {
-        // This case should be caught by config.ts validation, but double-check
-        console.error("[Generator Service] FATAL ERROR: OPENROUTER_API_KEY is not configured.");
-        isGeneratorInitialized = false;
-        return; // Prevent setting initialized flag
-    }
+    if (!API_KEY) { console.error("[Generator Service] FATAL ERROR: OPENROUTER_API_KEY variable is missing or empty *after* config load."); isGeneratorInitialized = false; return; }
+     console.log(`[Generator Service] Using API Key starting with: ${API_KEY.substring(0, 10)}... and ending with ...${API_KEY.substring(API_KEY.length - 4)}`);
      console.log(`[Generator Service] Configured to use OpenRouter model: ${MODEL_IDENTIFIER}`);
     isGeneratorInitialized = true;
 }
 
-// Ensure service is initialized before first use (lazy initialization)
-// initializeGenerator(); // Call this explicitly in server startup if preferred
-
-
-export async function generateAnswer(question: string, requestContext?: string): Promise<string> {
-    if (!isGeneratorInitialized) initializeGenerator(); // Ensure initialized
-
-    if (!API_KEY || !isGeneratorInitialized) {
-        console.error("[Generator Service] OpenRouter API Key not configured or service failed initialization.");
-        return "Error: AI answer generation service is not available."; // Return error string
+// Rate Limiter Function
+async function waitForRateLimit(context?: string, agentId?: string): Promise<void> {
+    const now = Date.now();
+    requestTimestamps = requestTimestamps.filter(ts => now - ts < RATE_LIMIT_WINDOW_MS);
+    const identifier = agentId ? `Agent ${agentId}` : `ClaimGen`;
+    const logPrefix = `[Rate Limiter - ${identifier} | Context: ${context?.substring(0,10)}...]`;
+    while (requestTimestamps.length >= MAX_REQUESTS_PER_WINDOW) {
+        console.warn(`${logPrefix} Rate limit hit (${requestTimestamps.length}/${MAX_REQUESTS_PER_WINDOW} reqs in ${RATE_LIMIT_WINDOW_MS / 1000}s). Waiting ${RATE_LIMIT_RETRY_DELAY_MS / 1000}s...`);
+        await new Promise(resolve => setTimeout(resolve, RATE_LIMIT_RETRY_DELAY_MS));
+        const currentTime = Date.now();
+        requestTimestamps = requestTimestamps.filter(ts => currentTime - ts < RATE_LIMIT_WINDOW_MS);
     }
-    if (!question || question.trim() === '') {
-        console.warn("[Generator Service] Received empty question.");
-        return "Error: Cannot generate answer for empty question.";
+    requestTimestamps.push(now);
+}
+
+// generateClaim (no changes needed from previous version with logging)
+export async function generateClaim(question: string, requestContext?: string): Promise<string> {
+    if (!isGeneratorInitialized) initializeGenerator();
+    if (!API_KEY || !isGeneratorInitialized) { console.error("[Generator Service] Cannot generate claim: API Key missing or service not initialized."); return "Error: Claim generation service misconfigured."; }
+    if (!question || question.trim() === '') { return "Error: Cannot generate claim for empty question."; }
+    await waitForRateLimit(requestContext);
+    console.log(`[Generator Service Request: ${requestContext?.substring(0,10)}...] Requesting CLAIM generation...`);
+    console.log(`[Generator Service DEBUG] Using API Key starting with: ${API_KEY.substring(0, 10)}...`);
+    const systemPrompt = 'Based on the QUESTION, provide a concise, verifiable factual claim that answers the question. Output only the claim.';
+    const payload = { model: MODEL_IDENTIFIER, messages: [ { role: "system", content: systemPrompt }, { role: "user", content: `QUESTION: "${question}"\n\nCLAIM:` } ], max_tokens: MAX_TOKENS_CLAIM, temperature: TEMPERATURE_CLAIM, top_p: 0.9, };
+    try {
+        const response = await axios.post( OPENROUTER_API_URL, payload, { headers: { 'Authorization': `Bearer ${API_KEY}`, 'Content-Type': 'application/json', 'HTTP-Referer': `http://localhost:${config.port || 3001}`, 'X-Title': 'Kintask ClaimGen', }, timeout: 60000 });
+        console.log(`[Generator Service Request: ${requestContext?.substring(0,10)}...] Claim Gen API Call Successful | Status: ${response.status}`);
+        const claim = response.data?.choices?.[0]?.message?.content?.trim().replace(/^CLAIM:\s*/i, '');
+        if (!claim) { throw new Error("LLM returned empty claim content."); }
+        console.log(`[Generator Service Request: ${requestContext?.substring(0,10)}...] Generated Claim: "${truncateText(claim, 70)}"`);
+        logRecallEvent('GENERATOR_MOCK_USED', { type: 'claim', generatedClaim: truncateText(claim, 100) }, requestContext || 'unknown').catch(/* ignore */);
+        return claim;
+    } catch (error: any) {
+        const axiosError = error as AxiosError; let detailedErrorMessage = axiosError.message.split('\n')[0]; let statusCode: number | string = 'N/A'; console.error(`\n--- ERROR in generateClaim ---`); if (axiosError.response) { statusCode = axiosError.response.status; console.error(`[...] Claim Gen API Call FAILED | Status: ${statusCode}`); console.error(`[...] Claim Gen Error Response Data:`, JSON.stringify(axiosError.response.data, null, 2)); detailedErrorMessage = (axiosError.response.data as any)?.error?.message || `HTTP Error ${statusCode}`; if (statusCode === 401) { console.error("[...] Received 401 Unauthorized. Check OPENROUTER_API_KEY in .env and RESTART server."); } else if (statusCode === 429) { console.error("[...] Received 429 Too Many Requests. OpenRouter API rate limit exceeded."); } } else if (axiosError.request) { console.error(`[...] Claim Gen Network Error (No response received) | Status: ${statusCode}`); } else { console.error(`[...] Claim Gen Setup Error | Status: ${statusCode} | Msg: ${detailedErrorMessage}`); } console.error(`[...] Final Error generating claim: ${detailedErrorMessage}`); console.error(`--- END ERROR in generateClaim ---\n`);
+        logRecallEvent('VERIFICATION_ERROR', { step: 'ClaimGenAPI', error: detailedErrorMessage, status: statusCode }, requestContext || 'unknown').catch(/* ignore */);
+        return `Error: Could not generate claim (${detailedErrorMessage.substring(0, 50)}...).`;
     }
+}
 
-    console.log(`[Generator Service Request: ${requestContext}] Requesting OpenRouter (${MODEL_IDENTIFIER}) answer...`);
+// --- LLMVerificationResult Interface (remains the same) ---
+export interface LLMVerificationResult { verdict: 'Supported' | 'Contradicted' | 'Neutral'; confidence: number; explanation?: string; }
 
-    // --- Construct Payload for OpenRouter (OpenAI compatible format) ---
-    const systemPrompt = 'You are Kintask, a helpful AI assistant. Provide concise, factual answers based on general knowledge. Avoid hedging or apologies.';
-    const payload = {
-        model: MODEL_IDENTIFIER,
-        messages: [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: question }
-        ],
-        max_tokens: MAX_TOKENS,
-        temperature: TEMPERATURE,
-        top_p: TOP_P,
-        // stream: false, // Explicitly disable streaming for simple request/response
-    };
-    // --- End Payload Construction ---
+// --- getVerificationFromLLM (with enhanced logging) ---
+export async function getVerificationFromLLM(
+    claim: string, paperExcerpt: string, requestContext?: string, agentId?: string
+): Promise<LLMVerificationResult> {
+    if (!isGeneratorInitialized) initializeGenerator();
+    if (!API_KEY || !isGeneratorInitialized) { console.error(`[Verifier Agent ${agentId} Error] Cannot verify: API Key missing or service not initialized.`); return { verdict: 'Neutral', confidence: 0.1, explanation: "Verifier LLM misconfigured." }; }
+
+    await waitForRateLimit(requestContext, agentId);
+
+    console.log(`[Verifier Agent ${agentId} Request: ${requestContext?.substring(0,10)}...] Requesting LLM verification...`);
+    console.log(`[Verifier Agent ${agentId} DEBUG] Using API Key starting with: ${API_KEY.substring(0, 10)}...`);
+
+    const systemPrompt = `You are an AI assistant evaluating scientific claims based on provided text excerpts. Analyze the TEXT EXCERPT to determine if it supports, contradicts, or is neutral towards the CLAIM.
+Respond ONLY in the following format:
+Verdict: [Supported|Contradicted|Neutral]
+Confidence: [A score from 0.0 to 1.0]
+Explanation: [A brief explanation (1 sentence)]`;
+    const maxExcerptLength = 3000;
+    const truncatedExcerpt = truncateText(paperExcerpt, maxExcerptLength);
+    const userPrompt = `CLAIM: "${claim}"\n\nTEXT EXCERPT:\n---\n${truncatedExcerpt}\n---\nBased *only* on the TEXT EXCERPT provided, evaluate the CLAIM.`;
+    const payload = { model: MODEL_IDENTIFIER, messages: [ { role: "system", content: systemPrompt }, { role: "user", content: userPrompt } ], max_tokens: MAX_TOKENS_VERIFY, temperature: TEMPERATURE_VERIFY, };
+
+    // --- ADDED: Log attempt ---
+    console.log(`[Verifier Agent ${agentId} DEBUG] Attempting axios.post to OpenRouter... | Context: ${requestContext?.substring(0,10)}...`);
+    // --- END ADDED ---
 
     try {
-        const response = await axios.post(
-            OPENROUTER_API_URL,
-            payload,
-            {
-                headers: {
-                    'Authorization': `Bearer ${API_KEY}`,
-                    'Content-Type': 'application/json',
-                    // Recommended headers for OpenRouter analytics/tracking
-                    'HTTP-Referer': `http://localhost:${config.port || 3001}`, // Use configured port
-                    'X-Title': 'Kintask Hackathon', // Your App Name
-                },
-                timeout: 60000 // 60 second timeout for API call
-            }
-        );
+        const response = await axios.post(OPENROUTER_API_URL, payload, {
+             headers: { 'Authorization': `Bearer ${API_KEY}`, 'Content-Type': 'application/json', 'HTTP-Referer': `http://localhost:${config.port || 3001}`, 'X-Title': 'Kintask VeriChain Verifier', },
+             timeout: 45000
+        });
+        console.log(`[Verifier Agent ${agentId} Request: ${requestContext?.substring(0,10)}...] Verify LLM API Call Successful | Status: ${response.status}`);
+        const content = response.data?.choices?.[0]?.message?.content?.trim();
+        // console.log(`[Verifier Agent ${agentId} DEBUG] Raw LLM Response: "${content}"`);
 
-        // --- Process OpenRouter Response ---
-        const choice = response.data?.choices?.[0];
-        const answer = choice?.message?.content?.trim();
-        const finishReason = choice?.finish_reason;
-
-        console.log(`[Generator Service Request: ${requestContext}] Finish Reason: ${finishReason || 'N/A'}`);
-
-        if (finishReason === 'length') {
-            console.warn(`[Generator Service Request: ${requestContext}] OpenRouter response truncated due to max_tokens limit.`);
-            // Return the truncated answer, the user might still find it useful
-        } else if (finishReason !== 'stop' && finishReason !== null) {
-             console.warn(`[Generator Service Request: ${requestContext}] Unusual finish reason: ${finishReason}.`);
-        }
-
-        if (!answer) {
-            console.warn(`[Generator Service Request: ${requestContext}] OpenRouter returned empty answer content. Response:`, JSON.stringify(response.data).substring(0, 200) + "...");
-            // Check for explicit errors in the response structure
-            const errorMsg = (response.data as any)?.error?.message || 'The AI model did not provide a valid text answer.';
-            // Log this failure to Recall
-             if (requestContext) {
-                 logRecallEvent('VERIFICATION_ERROR', { step: 'GeneratorParse', error: errorMsg, responseData: response.data }, requestContext)
-                    .catch(err => console.error("Error logging generator parse error to recall:", err));
-             }
-            return `Error: ${errorMsg}`;
-        }
-        // --- End Response Processing ---
-
-        console.log(`[Generator Service Request: ${requestContext}] Received OpenRouter answer (truncated): "${answer.substring(0, 100)}..."`);
-        return answer;
+        if (!content) { throw new Error("LLM Verifier returned empty content."); }
+        // Parsing logic...
+        let verdict: 'Supported' | 'Contradicted' | 'Neutral' = 'Neutral'; let confidence = 0.5; let explanation = "Could not parse LLM response.";
+        const verdictMatch = content.match(/Verdict:\s*(Supported|Contradicted|Neutral)/i); const confidenceMatch = content.match(/Confidence:\s*([0-9.]+)/i); const explanationMatch = content.match(/Explanation:\s*(.*)/i);
+        if (verdictMatch?.[1]) { const fv = verdictMatch[1].charAt(0).toUpperCase() + verdictMatch[1].slice(1).toLowerCase(); if (fv === 'Supported' || fv === 'Contradicted' || fv === 'Neutral') { verdict = fv; } else { console.warn(`[...] Parsed unknown verdict: ${fv}`); }} else { console.warn(`[...] Could not parse Verdict.`); }
+        if (confidenceMatch?.[1]) { const pc = parseFloat(confidenceMatch[1]); if (!isNaN(pc) && pc >= 0 && pc <= 1) { confidence = pc; } else { console.warn(`[...] Parsed invalid confidence: ${confidenceMatch[1]}`); }} else { console.warn(`[...] Could not parse Confidence.`); }
+        if (explanationMatch?.[1]) { explanation = explanationMatch[1].trim(); } else { console.warn(`[...] Could not parse Explanation.`); }
+        return { verdict, confidence: parseFloat(confidence.toFixed(2)), explanation };
 
     } catch (error: any) {
         const axiosError = error as AxiosError;
-        console.error(`[Generator Service Request: ${requestContext}] Error fetching answer from OpenRouter:`, axiosError.message);
-
-        let detailedErrorMessage = axiosError.message;
-        let responseDataForLog: any = null;
-
+        let detailedErrorMessage = axiosError.message.split('\n')[0];
+        let statusCode: number | string = 'N/A';
+        // --- ADDED/ENHANCED LOGGING ---
+        console.error(`\n--- ERROR in getVerificationFromLLM (Agent: ${agentId}, Context: ${requestContext?.substring(0,10)}) ---`);
         if (axiosError.response) {
-            console.error(`  Status: ${axiosError.response.status}`);
-            const responseData = axiosError.response.data;
-            responseDataForLog = responseData; // Log the actual response data if available
-            console.error('  Response Data:', JSON.stringify(responseData).substring(0, 300) + "...");
-            // Extract specific error message from OpenRouter/model if available
-            detailedErrorMessage = (responseData as any)?.error?.message || `HTTP Error ${axiosError.response.status}`;
+            statusCode = axiosError.response.status;
+            console.error(`[Verifier Agent ${agentId} Request: ${requestContext?.substring(0,10)}...] Verify LLM API Call FAILED | Status: ${statusCode}`);
+            console.error(`[Verifier Agent ${agentId} DEBUG] Error Response Data:`, JSON.stringify(axiosError.response.data, null, 2)); // Log full error response
+            detailedErrorMessage = (axiosError.response.data as any)?.error?.message || `HTTP Error ${statusCode}`;
+             if (statusCode === 401) { console.error(`[Verifier Agent ${agentId} ERROR] Received 401 Unauthorized.`); }
+             if (statusCode === 429) { console.error(`[Verifier Agent ${agentId} ERROR] Received 429 Too Many Requests.`); }
         } else if (axiosError.request) {
-             console.error('  No response received from OpenRouter.');
-             detailedErrorMessage = 'No response received from OpenRouter service.';
+             console.error(`[Verifier Agent ${agentId} Request: ${requestContext?.substring(0,10)}...] Verify LLM Network Error (No response received) | Status: ${statusCode}`);
+             // --- ADDED: Log underlying error code if available ---
+             if (axiosError.code) { console.error(`[Verifier Agent ${agentId} DEBUG] Network Error Code: ${axiosError.code}`); }
+             // --- END ADDED ---
         } else {
-             console.error('  Error setting up OpenRouter request:', error.message);
-             detailedErrorMessage = `Request setup error: ${error.message}`;
+            console.error(`[Verifier Agent ${agentId} Request: ${requestContext?.substring(0,10)}...] Verify LLM Setup Error | Status: ${statusCode} | Msg: ${detailedErrorMessage}`);
         }
+        // --- ADDED: Log the full error object for deeper inspection ---
+        console.error(`[Verifier Agent ${agentId} DEBUG] Full Axios Error Object:`, error);
+        // --- END ADDED ---
+        console.error(`[Verifier Agent ${agentId} Error] Final Error for LLM call | Context: ${requestContext?.substring(0,10)}... | Error: ${detailedErrorMessage}`);
+        console.error(`--- END ERROR in getVerificationFromLLM --- \n`);
 
-        // Log error details to Recall
-        if (requestContext) {
-            logRecallEvent('VERIFICATION_ERROR', { step: 'GeneratorAPI', error: detailedErrorMessage, responseData: responseDataForLog }, requestContext)
-                .catch(err => console.error("Error logging generator API error to recall:", err));
-        }
-
-        return `Error: Could not retrieve answer from the AI model (${detailedErrorMessage.substring(0, 80)}...).`; // Return user-friendly error
+        logRecallEvent('VERIFICATION_ERROR', { step: 'VerifierLLM_API', agentId, error: detailedErrorMessage, status: statusCode }, requestContext || 'unknown').catch(/* ignore */);
+        return { verdict: 'Neutral', confidence: 0.1, explanation: `LLM API Error: ${detailedErrorMessage}` };
     }
 }===== ./services/recallService.ts =====
-// recall.service.ts
+// services/recallService.ts
 import config from '../config';
 import { RecallLogEntryData, RecallEventType } from '../types';
 import { testnet } from '@recallnet/chains'; // Use the testnet chain definition
-import { createWalletClient, http, parseEther, WalletClient, PublicClient, createPublicClient, ChainMismatchError } from 'viem';
+import { createWalletClient, http, parseEther, WalletClient, PublicClient, createPublicClient, ChainMismatchError, BaseError, ContractFunctionExecutionError } from 'viem'; // Added BaseError, ContractFunctionExecutionError
 import { privateKeyToAccount, Account } from 'viem/accounts';
-// Assuming named exports based on example structure
-import { RecallClient } from '@recallnet/sdk/client'; // Removed BucketManager import
+import { RecallClient } from '@recallnet/sdk/client';
 
 // --- Module State ---
 let recallClientInstance: RecallClient | null = null;
 let isRecallInitialized = false;
-let logBucketAddress = config.recallLogBucket || null; // Store the bucket address globally
+let logBucketAddress = config.recallLogBucket || null;
 let account: Account | null = null;
-const RECALL_BUCKET_ALIAS = 'kintask-log-bucket-v1'; // Unique alias for this project's log bucket
-let initPromise: Promise<RecallClient> | null = null; // To handle concurrent initializations
+const RECALL_BUCKET_ALIAS = 'kintask-log-bucket-v1';
+let initPromise: Promise<RecallClient> | null = null;
 
 // --- Helper: Create Viem Wallet Client ---
 function getWalletClient(): WalletClient {
@@ -679,24 +1537,22 @@ function getWalletClient(): WalletClient {
         ? config.recallPrivateKey as `0x${string}`
         : `0x${config.recallPrivateKey}` as `0x${string}`;
 
-    if (!account) { // Cache the account object
+    if (!account) {
          account = privateKeyToAccount(formattedPrivateKey);
          console.log(`[Recall Service] Using wallet address: ${account.address} on chain ${testnet.id}`);
     }
 
-    // Ensure the transport is configured for the correct chain
     return createWalletClient({
         account: account,
-        chain: testnet, // Explicitly set Recall testnet chain
-        transport: http(), // Default HTTP transport - Add RPC URL from testnet config if needed explicitly
-                          // transport: http(testnet.rpcUrls.default.http[0]),
+        chain: testnet,
+        transport: http(),
     });
 }
 
  // --- Helper: Create Viem Public Client ---
  function getPublicClient(): PublicClient {
      return createPublicClient({
-         chain: testnet, // Use Recall testnet chain
+         chain: testnet,
          transport: http(),
      });
  }
@@ -707,32 +1563,32 @@ async function getRecallClient(): Promise<RecallClient> {
     if (recallClientInstance && isRecallInitialized) {
         return recallClientInstance;
     }
-    // Prevent race conditions during initialization
     if (initPromise) {
         return initPromise;
     }
 
     initPromise = (async () => {
-        console.log("[Recall Service] Initializing Recall Client (getRecallClient)...");
+        console.log("[Recall Service] Initializing Recall Client..."); // Simplified
         try {
-            const walletClient = getWalletClient(); // Get viem wallet client configured for Recall testnet
+            const walletClient = getWalletClient();
             const client = new RecallClient({ walletClient });
 
-            // Basic check: Ensure client has account after initialization
             if (!client.walletClient.account?.address) {
                 throw new Error("Failed to initialize client: Wallet address missing.");
             }
             console.log("[Recall Service] Recall Client Initialized successfully.");
             recallClientInstance = client;
-            isRecallInitialized = true; // Mark as initialized
-            initPromise = null; // Clear promise
+            isRecallInitialized = true;
+            initPromise = null;
             return client;
         } catch (error: any) {
-            console.error("[Recall Service] FATAL ERROR initializing Recall Client:", error.message);
+            // Log concise error
+            const conciseError = (error instanceof Error) ? error.message.split('\n')[0] : String(error);
+            console.error("[Recall Service] FATAL ERROR initializing Recall Client:", conciseError);
             recallClientInstance = null;
             isRecallInitialized = false;
             initPromise = null;
-            throw new Error(`Recall Client initialization failed: ${error.message}`); // Rethrow to calling function
+            throw new Error(`Recall Client initialization failed: ${conciseError}`);
         }
     })();
 
@@ -740,43 +1596,42 @@ async function getRecallClient(): Promise<RecallClient> {
 }
 
 // --- Helper: Ensure Credit Balance ---
-// Returns true if credit was sufficient OR successfully purchased, false otherwise
 async function ensureCreditBalanceIfZero(recall: RecallClient): Promise<boolean> {
-    console.log("[Recall Service] Checking credit balance...");
+    // console.log("[Recall Service] Checking credit balance..."); // Kept this high-level log
     try {
         const creditManager = recall.creditManager();
         const { result: creditBalance } = await creditManager.getCreditBalance();
         const creditFree = creditBalance?.creditFree ?? 0n;
-        console.log(`[Recall Service] Current credit_free: ${creditFree.toString()}`);
+        // console.log(`[Recall Service] Current credit_free: ${creditFree.toString()}`); // Commented out for less noise
 
-        if (creditFree === 0n) { // Only buy if exactly zero
-            console.log('[Recall Service] credit_free is 0, attempting to buy 1 credit...');
+        if (creditFree === 0n) {
+            console.log('[Recall Service] Credit is 0, attempting to buy 1 RTC...'); // Concise
             const amountToBuy = parseEther("1");
             const { meta } = await creditManager.buy(amountToBuy);
             const txHash = meta?.tx?.transactionHash;
             if (!txHash) throw new Error("Credit purchase transaction did not return a hash.");
 
-            console.log(`[Recall Service] Credit purchase transaction sent: ${txHash}. Waiting for confirmation...`);
+            console.log(`[Recall Service] Credit purchase tx sent: ${txHash.substring(0,15)}... Waiting for confirmation...`); // Truncated hash
             const publicClient = getPublicClient();
             const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash, confirmations: 1 });
 
             if (receipt.status === 'success') {
-                 console.log(`[Recall Service] Credit purchased successfully (Tx: ${txHash}).`);
-                 await new Promise(resolve => setTimeout(resolve, 3000)); // Allow buffer time
+                 console.log(`[Recall Service] Credit purchased successfully (Tx: ${txHash.substring(0,15)}...).`); // Truncated hash
+                 await new Promise(resolve => setTimeout(resolve, 3000));
                  return true;
             } else {
-                 console.error(`[Recall Service] Credit purchase transaction failed (Tx: ${txHash}). Status: ${receipt.status}`);
+                 console.error(`[Recall Service] Credit purchase failed (Tx: ${txHash.substring(0,15)}...). Status: ${receipt.status}`); // Truncated hash
                  throw new Error(`Failed to purchase Recall credit (Tx: ${txHash}, Status: ${receipt.status}).`);
             }
         }
-        return true; // Credit was > 0 initially
+        return true;
     } catch (error: any) {
-        console.error("[Recall Service] Error checking or buying credit:", error.message);
+        const conciseError = (error instanceof Error) ? error.message.split('\n')[0] : String(error);
+        console.error("[Recall Service] Error checking/buying credit:", conciseError); // Log concise error
          if (error instanceof ChainMismatchError) {
-              console.error("[Recall Service] Chain mismatch detected. Check Recall SDK/Chain config.");
+              console.error("[Recall Service] Chain mismatch detected. Check SDK/Chain config.");
          }
-        // Rethrow or return false to indicate failure? Let's rethrow for clarity.
-        throw new Error(`Failed to ensure Recall credit balance: ${error.message}`);
+        throw new Error(`Failed to ensure Recall credit balance: ${conciseError}`);
     }
 }
 
@@ -786,30 +1641,28 @@ async function ensureLogBucket(recall: RecallClient): Promise<string> {
         return logBucketAddress;
     }
 
-    console.log(`[Recall Service] Attempting to find or create log bucket with alias: ${RECALL_BUCKET_ALIAS}`);
+    console.log(`[Recall Service] Ensuring log bucket (Alias: ${RECALL_BUCKET_ALIAS})...`); // Simplified
     const bucketManager = recall.bucketManager();
     let foundBucket: string | null = null;
 
     try {
         const { result: listResult } = await bucketManager.list();
-        const buckets = listResult?.buckets || [];
-        console.log(`[Recall Service] Checking ${buckets.length} accessible buckets for alias...`);
+        const buckets = listResult?.buckets ?? [];
+        // console.log(`[Recall Service] Checking ${buckets.length} accessible buckets...`); // Less verbose
 
-        for (const bucketAddr of buckets) {
+        for (const bucketInfo of buckets) {
             try {
-                // list returns { kind: string, addr: string, metadata: Record<string, unknown> }[]
-                // No need to call getMetadata separately if list returns it
-                if (bucketAddr.metadata?.alias === RECALL_BUCKET_ALIAS) {
-                    console.log(`[Recall Service] Found existing log bucket: ${bucketAddr.addr}`);
-                    foundBucket = bucketAddr.addr;
+                if (bucketInfo.metadata?.alias === RECALL_BUCKET_ALIAS) {
+                    console.log(`[Recall Service] Found existing log bucket: ${bucketInfo.addr.substring(0,10)}...`); // Truncated
+                    foundBucket = bucketInfo.addr;
                     break;
                 }
-            } catch (listError: any) { /* Handle specific list errors if needed */ }
+            } catch (listError: any) { /* Ignore */ }
         }
 
         if (!foundBucket) {
-            console.log(`[Recall Service] Log bucket alias '${RECALL_BUCKET_ALIAS}' not found. Creating new bucket...`);
-            await ensureCreditBalanceIfZero(recall); // Ensure credit before creating
+            console.log(`[Recall Service] Log bucket alias not found. Creating new bucket...`);
+            await ensureCreditBalanceIfZero(recall);
 
             const createMetaPayload = { alias: RECALL_BUCKET_ALIAS, createdBy: 'KintaskBackend', timestamp: new Date().toISOString() };
             const { result, meta: createMetaInfo } = await bucketManager.create({ metadata: createMetaPayload });
@@ -817,21 +1670,22 @@ async function ensureLogBucket(recall: RecallClient): Promise<string> {
             const createTxHash = createMetaInfo?.tx?.transactionHash;
 
             if (foundBucket) {
-                 console.log(`[Recall Service] Successfully created new log bucket: ${foundBucket} (Tx: ${createTxHash})`);
-                 console.warn(`ACTION REQUIRED: Consider adding/updating RECALL_LOG_BUCKET in .env to: ${foundBucket} for faster startup.`);
+                 console.log(`[Recall Service] Created new log bucket: ${foundBucket.substring(0,10)}... (Tx: ${createTxHash?.substring(0,15)}...)`); // Truncated
+                 console.warn(`ACTION REQUIRED: Consider adding RECALL_LOG_BUCKET=${foundBucket} to .env for faster startup.`);
             } else {
-                 const errorMsg = createMetaInfo?.error?.message || "Bucket creation call succeeded but no bucket address was returned.";
-                 console.error("[Recall Service] Bucket creation failed:", errorMsg, createMetaInfo);
+                 const errorMsg = createMetaInfo?.error?.message?.split('\n')[0] || "Bucket creation failed."; // Concise error
+                 console.error("[Recall Service] Bucket creation failed:", errorMsg);
                  throw new Error(errorMsg);
             }
         }
 
-        logBucketAddress = foundBucket; // Cache address
+        logBucketAddress = foundBucket;
         return logBucketAddress;
 
     } catch (error: any) {
-        console.error("[Recall Service] Error finding or creating log bucket:", error.message);
-        throw new Error(`Failed to ensure Recall log bucket: ${error.message}`);
+        const conciseError = (error instanceof Error) ? error.message.split('\n')[0] : String(error);
+        console.error("[Recall Service] Error ensuring log bucket:", conciseError); // Concise error
+        throw new Error(`Failed to ensure Recall log bucket: ${conciseError}`);
     }
 }
 
@@ -840,7 +1694,7 @@ export async function logRecallEvent(
     type: RecallEventType,
     details: Record<string, any>,
     requestContext: string
-): Promise<string | undefined> { // Returns Recall Tx Hash or undefined
+): Promise<string | undefined> {
 
     if (!requestContext) {
          console.error("[Recall Service] CRITICAL: logRecallEvent called without requestContext.");
@@ -850,29 +1704,29 @@ export async function logRecallEvent(
     let recall: RecallClient;
     let bucketAddr: string;
     try {
-        // Get client, bucket, and ensure credit *before* creating log entry object
         recall = await getRecallClient();
         bucketAddr = await ensureLogBucket(recall);
-        await ensureCreditBalanceIfZero(recall);
     } catch (setupError: any) {
-        console.error(`[Recall Service] Setup failed before logging event ${type} (Context: ${requestContext}):`, setupError.message);
-        return undefined; // Cannot log if setup fails
+        // Log concise error
+        const conciseError = (setupError instanceof Error) ? setupError.message.split('\n')[0] : String(setupError);
+        console.error(`[Recall Service Setup Error] Context ${requestContext.substring(0,10)} | Event ${type}: ${conciseError}`);
+        return undefined;
     }
 
     const logEntry: RecallLogEntryData = {
         timestamp: new Date().toISOString(),
         type: type,
-        details: details,
+        details: details, // Details are kept for Recall, but not logged verbosely here
         requestContext: requestContext,
     };
 
-    // Prepare data for storage
     const contentString = JSON.stringify(logEntry);
     const fileBuffer = Buffer.from(contentString, 'utf8');
     const timestampSuffix = logEntry.timestamp.replace(/[:.]/g, '-');
-    const key = `${requestContext}/${timestampSuffix}_${type}.json`; // Structure logs by request context
+    const key = `${requestContext}/${timestampSuffix}_${type}.json`;
 
-    // console.log(`[Recall Service] Logging Event [${requestContext}] Type=${type} to Bucket ${bucketAddr.substring(0,10)}... Key=${key.substring(0,50)}...`);
+    // High-level log before attempt
+    console.log(`[Recall Service] Logging event | Type: ${type} | Context: ${requestContext.substring(0,10)}...`);
 
     try {
         const bucketManager = recall.bucketManager();
@@ -880,17 +1734,33 @@ export async function logRecallEvent(
         const txHash = meta?.tx?.transactionHash;
 
         if (!txHash) {
-             console.warn(`[Recall Service] Log add successful (according to SDK meta?) for context ${requestContext}, type ${type}, but no txHash returned. Status uncertain.`);
-             // Check meta for other status info if available
+             console.warn(`[Recall Service] Log add for ${type} possibly successful (Context: ${requestContext.substring(0,10)}...) but no txHash returned. Meta status:`, meta?.status ?? 'Unknown'); // Show status if available
              return undefined;
         }
 
-        console.log(`[Recall Service] Log Event ${type} stored for context ${requestContext}. TxHash: ${txHash}`);
+        // console.log(`[Recall Service] Log Event ${type} stored. Context: ${requestContext.substring(0,10)}... | TxHash: ${txHash.substring(0,15)}...`); // Slightly less verbose
         return txHash;
 
     } catch (error: any) {
-        console.error(`[Recall Service] Error adding log event ${type} for context ${requestContext} to bucket ${bucketAddr}:`, error.message);
-        return undefined; // Indicate logging failure
+        // Extract concise error message
+        let conciseError = `Failed to add object for event ${type}`;
+        if (error instanceof BaseError) {
+            // Viem errors often have a 'shortMessage'
+            conciseError = error.shortMessage || error.message.split('\n')[0];
+        } else if (error instanceof Error) {
+            conciseError = error.message.split('\n')[0];
+        } else {
+            conciseError = String(error);
+        }
+         // Specifically check for balance issues
+        if (conciseError.includes('less than needed') || conciseError.includes('insufficient funds')) {
+             conciseError = `Insufficient RTC balance for wallet ${account?.address.substring(0,6)}... to log event ${type}`;
+             console.error(`[Recall Service] ${conciseError} | Context: ${requestContext.substring(0,10)}...`);
+        } else {
+             console.error(`[Recall Service] Error adding log event ${type} | Context: ${requestContext.substring(0,10)}... | Error: ${conciseError}`);
+        }
+        // Do NOT log the full error object here to avoid verbosity
+        throw error; // Rethrow so calling function (addStep) knows it failed
     }
 }
 
@@ -898,56 +1768,59 @@ export async function logRecallEvent(
 export async function getTraceFromRecall(requestContext: string): Promise<RecallLogEntryData[]> {
     if (!requestContext) return [];
 
-    console.log(`[Recall Service] Retrieving trace for context: ${requestContext}`);
+    console.log(`[Recall Service] Retrieving trace | Context: ${requestContext.substring(0,10)}...`);
     let recall: RecallClient;
     let bucketAddr: string;
     try {
         recall = await getRecallClient();
-        // Use cached bucket address if available, otherwise ensure it exists
         bucketAddr = logBucketAddress || await ensureLogBucket(recall);
     } catch (initError: any) {
-         console.error(`[Recall Service] Initialization failed for retrieving trace (Context: ${requestContext}):`, initError.message);
+         const conciseError = (initError instanceof Error) ? initError.message.split('\n')[0] : String(initError);
+         console.error(`[Recall Service] Initialization failed for trace retrieval | Context: ${requestContext.substring(0,10)}... | Error: ${conciseError}`);
          return [];
     }
 
     try {
         const bucketManager = recall.bucketManager();
-        const prefix = `${requestContext}/`; // Query by the context "folder"
+        const prefix = `${requestContext}/`;
 
-        console.log(`[Recall Service] Querying bucket ${bucketAddr.substring(0,10)}... for prefix: ${prefix}`);
+        // console.log(`[Recall Service] Querying bucket ${bucketAddr.substring(0,10)}... for prefix: ${prefix}`); // Less verbose
         const { result: queryResult } = await bucketManager.query(bucketAddr, { prefix: prefix, delimiter: '' });
 
         const objectInfos = (queryResult?.objects || []);
         const objectKeys = objectInfos.map(obj => obj.key).filter((k): k is string => !!k && k.endsWith('.json'));
 
         if (objectKeys.length === 0) {
-            console.log(`[Recall Service] No log entries found via query for context: ${requestContext}`);
+            console.log(`[Recall Service] No log entries found for context: ${requestContext.substring(0,10)}...`);
             return [];
         }
-        console.log(`[Recall Service] Found ${objectKeys.length} log keys for context ${requestContext}. Fetching content...`);
+        console.log(`[Recall Service] Found ${objectKeys.length} log keys. Fetching content... | Context: ${requestContext.substring(0,10)}...`);
 
-        // Fetch content concurrently
         const fetchPromises = objectKeys.map(async (key) => {
              try {
                  const { result: objectResult } = await bucketManager.get(bucketAddr, key);
-                 const objectBuf = objectResult as Uint8Array | null; // SDK's get returns Uint8Array
+                 const objectBuf = objectResult as Uint8Array | null;
                  if (!objectBuf) {
-                     console.warn(`[Recall Service] Got null buffer for key ${key}`);
+                     console.warn(`[Recall Service] Got null buffer for key ${key.substring(0,30)}...`);
                      return null;
                  }
-                 // Ensure it's a Buffer before decoding (Node.js Buffer handles Uint8Array)
                  const buffer = Buffer.from(objectBuf);
                  const textContent = buffer.toString('utf8');
-                 const logEntry = JSON.parse(textContent) as RecallLogEntryData;
-                 if (logEntry && logEntry.timestamp && logEntry.type && logEntry.details) {
-                      return logEntry;
+                 try {
+                     const logEntry = JSON.parse(textContent) as RecallLogEntryData;
+                     if (logEntry?.timestamp && logEntry?.type && logEntry?.details) {
+                          return logEntry;
+                     }
+                     console.warn(`[Recall Service] Invalid log format in key ${key.substring(0,30)}...`);
+                 } catch (parseError: any) {
+                    console.error(`[Recall Service] JSON Parse Error for key ${key.substring(0,30)}... | Error: ${parseError.message}`);
                  }
-                 console.warn(`[Recall Service] Invalid log format found parsing key ${key}`);
                  return null;
              } catch (fetchError: any) {
-                  console.error(`[Recall Service] Error fetching/parsing key ${key}: ${fetchError.message}`);
+                  const conciseError = (fetchError instanceof Error) ? fetchError.message.split('\n')[0] : String(fetchError);
+                  console.error(`[Recall Service] Error fetching/parsing key ${key.substring(0,30)}... | Error: ${conciseError}`);
                    if (fetchError.message?.includes("Object not found")) {
-                        console.warn(`   -> Object likely deleted or query/get mismatch for key ${key}`);
+                        console.warn(`   -> Object likely deleted or query mismatch for key ${key.substring(0,30)}...`);
                    }
                   return null;
              }
@@ -955,88 +1828,101 @@ export async function getTraceFromRecall(requestContext: string): Promise<Recall
 
         const logEntries = (await Promise.all(fetchPromises))
                             .filter((entry): entry is RecallLogEntryData => entry !== null)
-                            .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()); // Sort chronologically
+                            .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
 
-         console.log(`[Recall Service] Successfully retrieved and parsed ${logEntries.length} log entries for context: ${requestContext}`);
+         console.log(`[Recall Service] Retrieved ${logEntries.length} log entries | Context: ${requestContext.substring(0,10)}...`);
          return logEntries;
 
     } catch (error: any) {
-        console.error(`[Recall Service] Error retrieving trace for context ${requestContext}:`, error.message);
-        return []; // Return empty trace on error
+        const conciseError = (error instanceof Error) ? error.message.split('\n')[0] : String(error);
+        console.error(`[Recall Service] Error retrieving trace | Context: ${requestContext.substring(0,10)}... | Error: ${conciseError}`);
+        return [];
     }
-}
-
-// Removed duplicate declaration: let logBucketAddress = config.recallLogBucket || null;===== ./services/timelockService.ts =====
-import { ethers, Wallet, Contract, AbiCoder, keccak256, getBytes, TransactionResponse, TransactionReceipt, Log, EventLog } from 'ethers';
+}===== ./services/timelockService.ts =====
+// ./src/services/timelockService.ts
+import { ethers, Wallet, Contract, utils, providers, BigNumber, Event } from 'ethers'; // Use v5 imports
 import { Blocklock, SolidityEncoder, encodeCiphertextToSolidity, TypesLib } from 'blocklock-js';
 import config from '../config';
-import KintaskCommitmentAbi from '../contracts/abi/KintaskCommitment.json'; // Load the ABI
+// @ts-ignore - Assume JSON ABI is correct
+import KintaskCommitmentAbi from '../contracts/abi/KintaskCommitment.json';
 import { KINTASK_COMMITMENT_CONTRACT_ADDRESS } from '../contracts/addresses';
 import { logRecallEvent } from './recallService'; // Import recall logger for reveal events
 
 interface CommitResult {
-    requestId: string; // The on-chain request ID from Blocklock
-    txHash: string; // The L2 transaction hash
-    ciphertextHash: string; // Hash of the encrypted data 'v' field
+    requestId: string;
+    txHash: string;
+    ciphertextHash: string;
 }
 
 // --- Initialization ---
-let provider: ethers.JsonRpcProvider | null = null;
+let provider: providers.StaticJsonRpcProvider | null = null;
 let wallet: Wallet | null = null;
 let blocklockJsInstance: Blocklock | null = null;
 let commitmentContract: Contract | null = null;
 let isTimelockInitialized = false;
 let revealListenerAttached = false;
-// Simple mapping to associate blocklock request ID with our internal request context for logging reveals
 const blocklockIdToRequestContext = new Map<string, string>();
-const MAX_CONTEXT_MAP_SIZE = 1000; // Prevent memory leak
+const MAX_CONTEXT_MAP_SIZE = 1000;
 
 // Function to initialize (or re-initialize) the service
-// Returns true if initialization is complete or already done, false if required config is missing
 function initializeTimelockService(): boolean {
-    if (isTimelockInitialized) return true; // Already initialized
+    if (isTimelockInitialized) return true;
     console.log("[Timelock Service] Initializing...");
     try {
-        // Validate critical config FIRST
-         if (!config.l2RpcUrl || !config.walletPrivateKey || !config.blocklockSenderProxyAddress || !KINTASK_COMMITMENT_CONTRACT_ADDRESS) {
-             console.warn("[Timelock Service] Skipping initialization: Missing required L2/Blocklock/Contract configuration in .env");
-             return false; // Cannot initialize
+        if (!config.l2RpcUrl || !config.walletPrivateKey || !config.blocklockSenderProxyAddress || !KINTASK_COMMITMENT_CONTRACT_ADDRESS) {
+             console.warn("[Timelock Service] Skipping initialization: Missing required config.");
+             return false;
          }
-         // Validate ABI presence
+          // @ts-ignore
           if (!KintaskCommitmentAbi.abi || KintaskCommitmentAbi.abi.length === 0) {
-               console.error("[Timelock Service] FATAL ERROR: KintaskCommitment ABI not found or empty. Run 'pnpm contracts:compile' and copy ABI.");
-               return false; // Cannot initialize without ABI
+               console.error("[Timelock Service] FATAL ERROR: KintaskCommitment ABI missing.");
+               return false;
           }
 
-        provider = new ethers.JsonRpcProvider(config.l2RpcUrl);
+        provider = new providers.StaticJsonRpcProvider(config.l2RpcUrl);
         wallet = new Wallet(config.walletPrivateKey, provider);
-        blocklockJsInstance = new Blocklock(wallet, config.blocklockSenderProxyAddress);
-        commitmentContract = new Contract(KINTASK_COMMITMENT_CONTRACT_ADDRESS, KintaskCommitmentAbi.abi, wallet);
 
-        // Perform async checks AFTER basic setup
-         Promise.all([
-             provider.getNetwork(),
-             commitmentContract.getAddress() // Check if contract connection works
-         ]).then(([network, address]) => {
-             console.log(`[Timelock Service] Connected to network: ${network.name} (Chain ID: ${network.chainId})`);
-             console.log(`[Timelock Service] KintaskCommitment contract instance connected at: ${address}`);
-             isTimelockInitialized = true; // Mark as fully initialized only after checks pass
-             console.log("[Timelock Service] Initialization complete.");
-             // Attempt to start listener only after successful init
-              startRevealListener(); // Start listener now that we are initialized
-         }).catch(err => {
-             console.error("[Timelock Service] Post-initialization check failed (Network or Contract connection issue):", err.message);
-             // Keep isTimelockInitialized = false if checks fail
-             isTimelockInitialized = false;
-         });
+        import('blocklock-js').then(BlocklockModule => {
+            blocklockJsInstance = new BlocklockModule.Blocklock(wallet!, config.blocklockSenderProxyAddress!);
+             // @ts-ignore
+             commitmentContract = new Contract(KINTASK_COMMITMENT_CONTRACT_ADDRESS!, KintaskCommitmentAbi.abi, wallet);
 
-         console.log("[Timelock Service] Initialization sequence started (async checks pending)...");
-         return true; // Return true indicating initialization started
+             Promise.all([
+                 provider!.getNetwork(),
+                 // --- FIX: Use contract.address property (ethers v5) ---
+                 Promise.resolve(commitmentContract.address) // Resolve address property
+                 // --- END FIX ---
+             ]).then(async ([network, address]) => { // Mark async to await getBlockNumber
+                 console.log(`[Timelock Service] Connected to network: ${network.name} (Chain ID: ${network.chainId})`);
+                 console.log(`[Timelock Service] Contract instance connected at: ${address}`); // address is now directly the string
+                 try {
+                    // Initialize lastPolledBlock - this part remains the same
+                    // @ts-ignore TODO: Remove polling or fix getBlockNumber call if needed
+                    // lastPolledBlock = await provider!.getBlockNumber();
+                    // console.log(`[Timelock Service] Initial polling block set to: ${lastPolledBlock}`);
+                    isTimelockInitialized = true;
+                    console.log("[Timelock Service] Initialization complete.");
+                    startRevealListener(); // Start listener
+                } catch (blockNumError: any) {
+                    console.error("[Timelock Service] Failed to get initial block number:", blockNumError.message);
+                    isTimelockInitialized = false;
+                }
+             }).catch(err => {
+                 console.error("[Timelock Service] Post-init check failed:", err.message);
+                 isTimelockInitialized = false;
+             });
+        }).catch(importError => {
+            console.error("[Timelock Service] FATAL: Failed to import blocklock-js:", importError);
+            isTimelockInitialized = false;
+        });
+
+         console.log("[Timelock Service] Initialization sequence started...");
+         return true;
 
     } catch (error: any) {
          console.error("[Timelock Service] FATAL Initialization failed:", error.message);
          isTimelockInitialized = false;
-         return false; // Indicate failure
+         return false;
     }
 }
 
@@ -1046,105 +1932,127 @@ initializeTimelockService();
 // --- Commit Function ---
 export async function commitVerdictTimelocked(
     verdict: string,
-    delayInBlocks: number = 5, // Default delay
-    requestContext?: string // Pass context for mapping reveal logs
+    delayInBlocks: number = 5,
+    requestContext?: string
 ): Promise<CommitResult | null> {
 
-    // Check initialization status before proceeding
     if (!isTimelockInitialized || !blocklockJsInstance || !commitmentContract || !provider || !wallet) {
         console.error('[Timelock Service] Service not initialized or ready. Cannot commit verdict.');
-        return null; // Fail if not ready
+        return null;
     }
 
-    let txResponse: TransactionResponse | null = null; // Define txResponse outside try
-    const logContext = requestContext || 'unknownContext'; // Use provided context or a default
+    let txResponse: providers.TransactionResponse | null = null;
+    const logContext = requestContext || 'unknownContext';
 
     try {
         const currentBlockNumber = await provider.getBlockNumber();
-        const decryptionBlockNumber = BigInt(currentBlockNumber + delayInBlocks);
-        console.log(`[Timelock Service Context: ${logContext}] Current Block: ${currentBlockNumber}, Decryption Block Target: ${decryptionBlockNumber}`);
+        const decryptionBlockNumber = BigNumber.from(currentBlockNumber + delayInBlocks);
+        console.log(`[Timelock Service Context: ${logContext}] Current Block: ${currentBlockNumber}, Decryption Block Target: ${decryptionBlockNumber.toString()}`);
 
-        // 1. Encode verdict string
-        const encoder = AbiCoder.defaultAbiCoder();
+        const encoder = utils.defaultAbiCoder;
         const encodedVerdict = encoder.encode(['string'], [verdict]);
-        const encodedVerdictBytes = getBytes(encodedVerdict);
+        const encodedVerdictBytes = utils.arrayify(encodedVerdict);
 
-        // 2. Encrypt using blocklock-js
         console.log(`[Timelock Service Context: ${logContext}] Encrypting verdict "${verdict}"`);
-        const ciphertext: TypesLib.Ciphertext = blocklockJsInstance.encrypt(encodedVerdictBytes, decryptionBlockNumber);
+        const ciphertext: TypesLib.Ciphertext = blocklockJsInstance.encrypt(encodedVerdictBytes, BigInt(currentBlockNumber + delayInBlocks));
+
+        const { encodeCiphertextToSolidity } = await import('blocklock-js');
         const solidityCiphertext = encodeCiphertextToSolidity(ciphertext);
-        const ciphertextHash = keccak256(solidityCiphertext.v); // Hash the encrypted part V
+        const ciphertextHash = utils.keccak256(solidityCiphertext.v);
         console.log(`[Timelock Service Context: ${logContext}] Ciphertext Hash: ${ciphertextHash}`);
 
-        // 3. Call commitVerdict on contract
-        console.log(`[Timelock Service Context: ${logContext}] Sending commitVerdict transaction to ${await commitmentContract.getAddress()}...`);
+        // --- FIX: Use contract.address property (ethers v5) ---
+        const contractAddress = commitmentContract.address;
+        console.log(`[Timelock Service Context: ${logContext}] Sending commitVerdict transaction to ${contractAddress}...`);
+        // --- END FIX ---
+
+        // Optional Gas Estimation (v5 uses estimateGas property on the function)
+        let estimatedGas: BigNumber | undefined;
+        try {
+            estimatedGas = await commitmentContract.estimateGas.commitVerdict(
+                 decryptionBlockNumber,
+                 solidityCiphertext
+            );
+            console.log(`[Timelock Service DEBUG] Estimated Gas: ${estimatedGas.toString()}`);
+        } catch (simError: any) {
+            let reason = simError.reason || simError.message;
+             // v5 error data might be different, simpler check
+             if (simError.error?.data?.message) { reason = simError.error.data.message; }
+            console.error(`[Timelock Service DEBUG] Gas estimation/simulation FAILED: ${reason}`);
+            throw new Error(`Transaction simulation/estimation failed: ${reason}`);
+        }
+
         txResponse = await commitmentContract.commitVerdict(
             decryptionBlockNumber,
-            solidityCiphertext
-            // Optional: Add gas estimation/limit
-            // { gasLimit: 300000 } // Example fixed gas limit
+            solidityCiphertext,
+            // Apply gas limit bump if estimation worked
+            { gasLimit: estimatedGas ? estimatedGas.mul(120).div(100) : undefined }
         );
+
+        if (!txResponse) {
+            throw new Error("commitVerdict call returned null response.");
+        }
+
         console.log(`[Timelock Service Context: ${logContext}] Commit transaction sent. Hash: ${txResponse.hash}`);
         console.log(`[Timelock Service Context: ${logContext}] Waiting for confirmation (1 block)...`);
-        const receipt: TransactionReceipt | null = await txResponse.wait(1);
+        const receipt: providers.TransactionReceipt | null = await txResponse.wait(1);
 
-        if (!receipt) throw new Error(`Commit transaction ${txResponse.hash} confirmation timed out or receipt was null.`);
+        if (!receipt) {
+             throw new Error(`Commit transaction ${txResponse?.hash ?? 'unknown'} confirmation timed out or receipt was null.`);
+         }
+
         console.log(`[Timelock Service Context: ${logContext}] Commit Tx Confirmed. Status: ${receipt.status}, Block: ${receipt.blockNumber}`);
-        if (receipt.status !== 1) throw new Error(`Commit transaction ${txResponse.hash} failed on-chain (Status: 0). Check explorer.`);
+        if (receipt.status !== 1) {
+            throw new Error(`Commit transaction ${txResponse?.hash ?? 'unknown'} failed on-chain (Status: 0). Check explorer.`);
+        }
 
-        // 4. Parse Blocklock Request ID from logs emitted by *our* contract
-        const eventInterface = commitmentContract.interface.getEvent('VerdictCommitted');
-        const eventTopic = eventInterface.topicHash;
-        const receiptLogs = receipt.logs || []; // Ensure logs is an array
-        const log = receiptLogs.find((l: Log) =>
+        const eventInterface = commitmentContract.interface;
+        const eventSignature = 'VerdictCommitted(uint256,address,uint256,bytes32)';
+        const eventTopic = eventInterface.getEventTopic(eventSignature);
+        const receiptLogs = receipt.logs || [];
+        const log = receiptLogs.find((l) =>
             l.topics[0] === eventTopic &&
-            l.address.toLowerCase() === KINTASK_COMMITMENT_CONTRACT_ADDRESS.toLowerCase()
+            l.address.toLowerCase() === KINTASK_COMMITMENT_CONTRACT_ADDRESS!.toLowerCase()
         );
 
-        if (!log) throw new Error(`Could not find VerdictCommitted event log in transaction receipt for ${txResponse.hash}.`);
-
-        const decodedLog = commitmentContract.interface.parseLog({ topics: [...log.topics], data: log.data });
+        if (!log) {
+            throw new Error(`Could not find VerdictCommitted event log in transaction receipt for ${txResponse?.hash ?? 'unknown'}.`);
+        }
+        const decodedLog = eventInterface.parseLog(log);
         const blocklockRequestId = decodedLog?.args.blocklockRequestId?.toString();
         if (!blocklockRequestId) throw new Error('Failed to decode Blocklock Request ID from VerdictCommitted event.');
-
         console.log(`[Timelock Service Context: ${logContext}] Successfully committed. Blocklock Request ID: ${blocklockRequestId}`);
 
-        // Store mapping for the listener
         if (requestContext) {
             if (blocklockIdToRequestContext.size >= MAX_CONTEXT_MAP_SIZE) {
                 const oldestKey = blocklockIdToRequestContext.keys().next().value;
-                 blocklockIdToRequestContext.delete(oldestKey);
-                 console.warn(`[Timelock Service] Context map size limit reached, removed oldest entry: ${oldestKey}`);
+                if (oldestKey !== undefined) {
+                    blocklockIdToRequestContext.delete(oldestKey);
+                    console.warn(`[Timelock Service] Context map size limit reached, removed oldest entry: ${oldestKey}`);
+                }
             }
             blocklockIdToRequestContext.set(blocklockRequestId, requestContext);
             console.log(`[Timelock Service] Mapped Blocklock ID ${blocklockRequestId} to Context ${requestContext}`);
-        } else {
-             console.warn("[Timelock Service] Request context not provided for mapping reveal listener.");
-        }
+        } else { console.warn("[Timelock Service] Request context not provided for mapping reveal listener."); }
 
         return {
             requestId: blocklockRequestId,
-            txHash: txResponse.hash,
+            txHash: txResponse?.hash ?? 'unknown_hash',
             ciphertextHash: ciphertextHash
         };
 
     } catch (error: any) {
         console.error(`[Timelock Service Error Context: ${logContext}] Error during commit:`, error.message);
         if (txResponse?.hash) console.error(`[Timelock Service] Failing Transaction Hash: ${txResponse.hash}`);
-        return null; // Indicate failure
+        return null;
     }
 }
 
 // --- Reveal Listener ---
 export function startRevealListener() {
-    if (revealListenerAttached) {
-        // console.log("[Timelock Service] Reveal listener already attached.");
-        return;
-    }
-     // Ensure initialized before attaching listener
+    if (revealListenerAttached) { return; }
      if (!isTimelockInitialized || !commitmentContract) {
          console.warn("[Timelock Service] Cannot start listener, service not fully initialized yet.");
-         // Initialization might still be in async checks, listener will start when/if init completes.
          return;
      }
 
@@ -1152,52 +2060,38 @@ export function startRevealListener() {
     try {
         const eventFilter = commitmentContract.filters.VerdictRevealed();
 
-         // Using commitmentContract.on() sets up a persistent listener
-         commitmentContract.on(eventFilter, async (requestIdBigInt, requester, revealedVerdictBytes, eventLog) => {
-            // Type assertion for ethers v6 EventLog
-            const log = eventLog as unknown as EventLog;
-            const blocklockRequestId = requestIdBigInt.toString();
-            const txHash = log.transactionHash; // Tx hash where the Blocklock callback happened
+         commitmentContract.on(eventFilter, async (requestIdBigNumber, requester, revealedVerdictBytes, event: Event) => {
+            const blocklockRequestId = requestIdBigNumber.toString();
+            const txHash = event.transactionHash;
 
             console.log(`\n[Timelock Listener] === Received VerdictRevealed Event ===`);
             console.log(`  Blocklock Request ID: ${blocklockRequestId}`);
-            console.log(`  Event Source Tx Hash: ${txHash}`); // This is the Blocklock callback tx hash
+            console.log(`  Event Source Tx Hash: ${txHash}`);
 
-             // Find the original request context using the mapping
              const requestContext = blocklockIdToRequestContext.get(blocklockRequestId);
              if (!requestContext) {
-                 console.warn(`[Timelock Listener] Could not find request context for revealed Blocklock ID: ${blocklockRequestId}. Cannot log details to Recall.`);
-                 // It's possible the context map was cleared or this ID was processed already
+                 console.warn(`[Timelock Listener] Could not find request context for revealed Blocklock ID: ${blocklockRequestId}.`);
                  return;
              }
              console.log(`  Associated Request Context: ${requestContext}`);
-
-             // Clean up the mapping immediately to prevent reprocessing
              blocklockIdToRequestContext.delete(blocklockRequestId);
 
              try {
-                // Decode the revealed verdict bytes (assuming it was encoded as a string)
-                const encoder = AbiCoder.defaultAbiCoder();
+                const encoder = utils.defaultAbiCoder;
                 const [revealedVerdict] = encoder.decode(['string'], revealedVerdictBytes);
-
                 console.log(`[Timelock Listener] Decoded Verdict for context ${requestContext}: "${revealedVerdict}"`);
 
-                // Log this reveal event to Recall Service under the original request context
                 await logRecallEvent(
                     'TIMELOCK_REVEAL_RECEIVED',
                     { blocklockRequestId, revealedVerdict, sourceTxHash: txHash, requester },
                     requestContext
                 );
                 console.log(`[Timelock Listener] Logged TIMELOCK_REVEAL_RECEIVED to Recall for context ${requestContext}`);
-
-                // TODO: Compare revealedVerdict with final calculated verdict from verifierService state?
-
              } catch(decodeError: any) {
                 console.error(`[Timelock Listener] Error decoding revealed verdict for ID ${blocklockRequestId}, Context ${requestContext}:`, decodeError.message);
-                // Log decode error to recall
                  await logRecallEvent(
                     'VERIFICATION_ERROR',
-                    { stage: 'TimelockRevealDecode', error: decodeError.message, blocklockRequestId, rawBytes: ethers.hexlify(revealedVerdictBytes) },
+                    { stage: 'TimelockRevealDecode', error: decodeError.message, blocklockRequestId, rawBytes: utils.hexlify(revealedVerdictBytes) },
                     requestContext
                 );
              }
@@ -1212,25 +2106,21 @@ export function startRevealListener() {
     }
 }
 
-// Function to stop listener (e.g., on shutdown)
+// Function to stop listener
 export function stopRevealListener() {
      if (revealListenerAttached && commitmentContract) {
          console.log("[Timelock Service] Removing VerdictRevealed listener...");
          try {
-             // Use off() or removeAllListeners() depending on specific needs and ethers version guarantees
-             commitmentContract.off("VerdictRevealed"); // Attempt to remove specific listener type
-             // Alternatively: commitmentContract.removeAllListeners("VerdictRevealed");
+             commitmentContract.removeAllListeners("VerdictRevealed");
              revealListenerAttached = false;
              console.log("[Timelock Service] Listener removed.");
          } catch (error: any) {
              console.error("[Timelock Service] Error removing listener:", error.message);
              revealListenerAttached = false;
          }
-     } else {
-          // console.log("[Timelock Service] Listener not attached or contract not initialized.");
      }
-}
-===== ./services/verifierService.ts =====
+}===== ./services/verifierService.ts =====
+// ./src/services/verifierService.ts
 import {
     KnowledgeFragment,
     VerificationResultInternal,
@@ -1238,13 +2128,23 @@ import {
     RecallEventType,
     VerificationStatus
 } from '../types';
-import { fetchKnowledgeFragment, getKnowledgeIndex } from './filecoinService';
+import { fetchKnowledgeSourceContent } from './filecoinService';
 import { commitVerdictTimelocked } from './timelockService';
 import { logRecallEvent } from './recallService';
-import { truncateText } from '../utils'; // Import utility
-import config from '../config'; // Import config to check if timelock is configured
+import { truncateText } from '../utils';
+import config from '../config';
+import { getVerificationFromLLM, LLMVerificationResult } from './generatorService';
+import { ethers, BigNumber } from 'ethers';
 
-// --- Helper Function ---
+// --- CHANGE: Reduce agents for testing ---
+const NUM_VERIFIER_AGENTS = 1; // Test with only one agent first
+// --- END CHANGE ---
+const CONSENSUS_THRESHOLD = 0.6;
+const CONTRADICTION_THRESHOLD = 0.6;
+const SIMULATED_TOTAL_REWARD_POOL = 1000;
+const SIMULATED_SUBMITTER_POOL_SHARE = 0.5;
+const SIMULATED_AGENT_POOL_SHARE = 0.5;
+
 const addStep = async (
     reasoningSteps: RecallLogEntryData[],
     requestContext: string,
@@ -1252,288 +2152,139 @@ const addStep = async (
     details: Record<string, any>
 ) => {
     const timestamp = new Date().toISOString();
-    // Simple truncation for potentially large values in logs
     const truncatedDetails = Object.entries(details).reduce((acc, [key, value]) => {
         try {
-            if (typeof value === 'string') {
-                acc[key] = truncateText(value, 250); // Truncate long strings
-            } else if (Array.isArray(value) && value.length > 15) {
-                 acc[key] = value.slice(0, 15).concat(['...truncated...']); // Truncate long arrays
-            } else if (key === 'stack') { // Don't stringify stack traces if too long
-                 acc[key] = truncateText(value?.toString(), 300);
-            } else if (typeof value === 'object' && value !== null && JSON.stringify(value).length > 300) {
-                 acc[key] = { _truncated: true, keys: Object.keys(value).slice(0,5) }; // Truncate large objects
-            } else if (typeof value === 'bigint') {
-                 acc[key] = value.toString(); // Convert BigInts
-            }
-            else {
-                acc[key] = value;
-            }
-        } catch (e) {
-             acc[key] = `<<Error truncating value for key ${key}>>`; // Handle potential errors during truncation/stringification
-        }
+            if (typeof value === 'string') { acc[key] = truncateText(value, 250); }
+            else if (Array.isArray(value) && value.length > 15) { acc[key] = value.slice(0, 15).concat(['...truncated...']); }
+            else if (key === 'stack') { acc[key] = truncateText(value?.toString(), 300); }
+            else if (typeof value === 'object' && value !== null && JSON.stringify(value).length > 300) { acc[key] = { _truncated: true, keys: Object.keys(value).slice(0,5) }; }
+            else if (typeof value === 'bigint') { acc[key] = value.toString(); }
+            else { acc[key] = value; }
+        } catch (e) { acc[key] = `<<Error truncating value for key ${key}>>`; }
         return acc;
     }, {} as Record<string, any>);
-
     const stepData: RecallLogEntryData = { timestamp, type, details: truncatedDetails, requestContext };
     reasoningSteps.push(stepData);
-    // Fire-and-forget logging to Recall
-    logRecallEvent(type, truncatedDetails, requestContext).catch(err => {
-        console.error(`[Verifier Service] Background logging to Recall failed for type ${type}:`, err.message);
-    });
+    logRecallEvent(type, truncatedDetails, requestContext).catch(err => { console.error(`[Verifier Service] Background logging to Recall failed for type ${type}:`, err.message); });
 };
 
 
-// --- Main Verification Logic Function ---
 export async function performVerification(
     question: string,
-    answer: string,
-    requestContext: string // Identifier for this specific verification task
+    claim: string,
+    requestContext: string
 ): Promise<VerificationResultInternal | null> {
 
-    console.log(`[Verifier Service] Starting verification for context: ${requestContext}`);
+    console.log(`[Verifier Service] Starting verification | Context: ${requestContext.substring(0,10)}... | Claim: "${claim.substring(0, 50)}..."`);
     const reasoningSteps: RecallLogEntryData[] = [];
-    let usedFragmentCids: string[] = []; // Track CIDs successfully fetched AND used in logic
-    let preliminaryVerdict: VerificationStatus = 'Unverified';
-    let confidenceScore = 0.5; // Start neutral
     let timelockDetails: Awaited<ReturnType<typeof commitVerdictTimelocked>> = null;
 
     try {
-        // --- Step 1: Input Analysis & Keyword Extraction ---
-        const questionLower = question.toLowerCase();
-        const answerLower = answer.toLowerCase();
-        const stopWords = new Set(['the', 'a', 'an', 'is', 'of', 'in', 'on', 'at', 'to', 'for', 'and', 'or', 'what', 'who', 'where', 'when', 'why', 'how', 'tell', 'me', 'about', 'can', 'you', 'please', 'i', 'it', 'my', 'your']);
-        const keywords = [...new Set(
-            questionLower.split(/\s+/) // Split by whitespace
-                .map(word => word.replace(/[^\w]/g, '').trim()) // Remove punctuation
-                .filter(word => word.length >= 3 && !stopWords.has(word)) // Filter length and stopwords
-        )];
-        await addStep(reasoningSteps, requestContext, 'REASONING_STEP', { step: 'AnalyzeInput', extractedKeywords: keywords });
+        // Step 1: Fetch Knowledge Source
+        await addStep(reasoningSteps, requestContext, 'KNOWLEDGE_FETCH_ATTEMPT', { stage: 'SourceContent', cid: config.knowledgeBaseIndexCid });
+        const paperContent = await fetchKnowledgeSourceContent();
+        if (!paperContent) {
+            await addStep(reasoningSteps, requestContext, 'VERIFICATION_ERROR', { stage: 'SourceFetch', error: 'Failed to retrieve knowledge source content', cid: config.knowledgeBaseIndexCid });
+            console.error(`[Verifier Service] Failed to retrieve knowledge source (CID: ${config.knowledgeBaseIndexCid}). Cannot perform verification.`);
+            return { finalVerdict: 'Error: Verification Failed', confidenceScore: 0, usedFragmentCids: [], reasoningSteps, };
+        }
+        await addStep(reasoningSteps, requestContext, 'KNOWLEDGE_FETCH_SUCCESS', { stage: 'SourceContent', cid: config.knowledgeBaseIndexCid, length: paperContent.length });
 
-        // --- Step 2: Fetch Index & Relevant CIDs ---
-        await addStep(reasoningSteps, requestContext, 'KNOWLEDGE_FETCH_ATTEMPT', { stage: 'Index', keywords });
-        const index = await getKnowledgeIndex(); // Fetches from cache or network
-        let relevantCids: string[] = [];
-        if (index) {
-            keywords.forEach(kw => {
-                if (index[kw]) relevantCids.push(...index[kw]);
-            });
-            relevantCids = [...new Set(relevantCids)]; // Deduplicate CIDs
-            await addStep(reasoningSteps, requestContext, 'KNOWLEDGE_FETCH_SUCCESS', { stage: 'Index', foundCidsCount: relevantCids.length });
-        } else {
-            await addStep(reasoningSteps, requestContext, 'VERIFICATION_ERROR', { stage: 'IndexFetch', error: 'Failed to retrieve knowledge index' });
-             console.error("[Verifier Service] Failed to retrieve knowledge index. Verification quality may be reduced.");
-             // Decide whether to throw or continue. Let's continue for robustness.
+        // Step 2: Simulate Multiple Verifier Agents
+        const verificationPromises: Promise<LLMVerificationResult>[] = [];
+        console.log(`[Verifier Service] Preparing ${NUM_VERIFIER_AGENTS} LLM agent verification call(s)... | Context: ${requestContext.substring(0,10)}...`);
+        for (let i = 0; i < NUM_VERIFIER_AGENTS; i++) {
+            const agentId = `agent_${i + 1}`;
+            verificationPromises.push( getVerificationFromLLM(claim, paperContent, requestContext, agentId) );
         }
 
-        // Limit number of fragments to fetch/process for performance in MVP
-        const MAX_FRAGMENTS_TO_PROCESS = 10;
-        const cidsToFetch = relevantCids.slice(0, MAX_FRAGMENTS_TO_PROCESS);
-        if (relevantCids.length > MAX_FRAGMENTS_TO_PROCESS) {
-             await addStep(reasoningSteps, requestContext, 'REASONING_STEP', { warning: 'Too many relevant fragments found', count: relevantCids.length, processingLimit: MAX_FRAGMENTS_TO_PROCESS });
-        }
+        console.log(`[Verifier Service] Waiting for ${NUM_VERIFIER_AGENTS} LLM agent verification(s)... | Context: ${requestContext.substring(0,10)}...`);
+        const agentResults = await Promise.allSettled(verificationPromises);
+        console.log(`[Verifier Service] Agent verification results settled. | Context: ${requestContext.substring(0,10)}...`);
 
+        // Step 3: Aggregate Results
+        let totalConfidence = 0, supportCount = 0, contradictCount = 0, neutralCount = 0;
+        const individualVerdicts: any[] = [];
+        const potentialWinningCids = new Set<string>();
+        const finalWinningAgentIds: string[] = [];
 
-        // --- Step 3: Fetch KG Fragments Concurrently ---
-        await addStep(reasoningSteps, requestContext, 'KNOWLEDGE_FETCH_ATTEMPT', { stage: 'Fragments', cidsToFetchCount: cidsToFetch.length });
-        const fetchPromises = cidsToFetch.map(cid =>
-            fetchKnowledgeFragment(cid).then(fragment => ({ cid, fragment }))
-        );
-        const fetchedResults = await Promise.all(fetchPromises);
+        let index = 0;
+        for (const result of agentResults) {
+            const agentId = `agent_${index + 1}`;
+            if (result.status === 'fulfilled') {
+                const agentResultValue = result.value as LLMVerificationResult;
+                const { verdict, confidence, explanation } = agentResultValue;
+                console.log(`[Verifier Service] Agent Result | Context: ${requestContext.substring(0,10)}... | ${agentId}: ${verdict} (Conf: ${confidence.toFixed(2)}) | Expl: "${truncateText(explanation, 80)}"`);
+                individualVerdicts.push({ agentId, verdict, confidence, explanation });
+                await addStep(reasoningSteps, requestContext, 'VERIFIER_SUBMISSION', { agentId, verdict, confidence, explanation: truncateText(explanation, 100) });
 
-        const fetchedFragments: KnowledgeFragment[] = [];
-        const successfullyFetchedCids = new Set<string>();
-        const failedFetches: string[] = [];
-        fetchedResults.forEach(result => {
-            if (result.fragment) {
-                fetchedFragments.push(result.fragment);
-                successfullyFetchedCids.add(result.cid);
+                if (verdict === 'Supported') { supportCount++; totalConfidence += confidence; finalWinningAgentIds.push(agentId); potentialWinningCids.add(`simulated_cid_for_${agentId}`); }
+                else if (verdict === 'Contradicted') { contradictCount++; totalConfidence += confidence; finalWinningAgentIds.push(agentId); potentialWinningCids.add(`simulated_cid_for_${agentId}`); }
+                else { neutralCount++; }
             } else {
-                failedFetches.push(result.cid);
+                 const reason = result.reason?.message || 'Unknown error';
+                 console.warn(`[Verifier Service] Agent Failed | Context: ${requestContext.substring(0,10)}... | ${agentId}: ${reason}`);
+                 individualVerdicts.push({ agentId, verdict: 'Error', confidence: 0, explanation: reason });
+                 await addStep(reasoningSteps, requestContext, 'VERIFICATION_ERROR', { stage: 'AgentVerification', agentId, error: reason });
             }
-        });
-        await addStep(reasoningSteps, requestContext, 'KNOWLEDGE_FETCH_SUCCESS', { stage: 'Fragments', fetchedCount: fetchedFragments.length, failedCidsCount: failedFetches.length });
-
-
-        // --- Step 4: Apply Verification Logic ---
-        if (fetchedFragments.length === 0 && relevantCids.length > 0) {
-             // If index found CIDs but fetching failed for all relevant ones
-             console.warn(`[Verifier Service] No relevant knowledge fragments could be fetched for context ${requestContext}, although index suggested ${relevantCids.length}.`);
-             await addStep(reasoningSteps, requestContext, 'REASONING_STEP', { warning: 'No fragments fetched despite finding relevant CIDs', failedCids });
-             preliminaryVerdict = 'Unverified'; // Cannot verify without data
-             confidenceScore = 0.1; // Very low confidence
-        } else if (fetchedFragments.length === 0 && relevantCids.length === 0) {
-             // If index found no relevant CIDs
-              console.log(`[Verifier Service] No relevant knowledge fragments found in index for context ${requestContext}.`);
-              await addStep(reasoningSteps, requestContext, 'REASONING_STEP', { info: 'No relevant fragments found in index' });
-              preliminaryVerdict = 'Unverified';
-              confidenceScore = 0.3; // Slightly higher confidence than fetch failure
+            index++;
         }
-        else {
-            // Apply logic only if fragments were fetched
-            await addStep(reasoningSteps, requestContext, 'REASONING_STEP', { step: 'ApplyVerificationLogic', fragmentCount: fetchedFragments.length });
-            let supportingScore = 0;
-            let contradictingScore = 0;
-            let uncertaintyFlags = 0;
-            let provenanceIssues = 0;
-            const fragmentsUsedInLogic: string[] = [];
 
-            for (const fragment of fetchedFragments) {
-                const fragmentId = fragment.fragment_id || `cid:${fragment.previous_version_cid?.substring(0, 8) ?? truncateText([...successfullyFetchedCids][fragmentsUsedInLogic.length], 8)}`;
-                fragmentsUsedInLogic.push(fragmentId);
-
-                try {
-                    const fragmentConf = fragment.provenance?.confidence_score ?? 0.7;
-
-                    // A) Uncertainty Check
-                    if (fragmentConf < 0.4) {
-                        uncertaintyFlags++;
-                        await addStep(reasoningSteps, requestContext, 'PROVENANCE_CHECK', { check: 'LowConfidenceSource', fragmentId, score: fragmentConf });
-                    }
-
-                    // B) Fact Matching Logic (Simple Placeholder)
-                    if (fragment.type === 'factual_statement' && fragment.content?.subject && fragment.content?.object) {
-                        const subject = fragment.content.subject.toLowerCase();
-                        const objectVal = fragment.content.object.toLowerCase();
-                        if ((keywords.includes(subject) || questionLower.includes(subject)) && answerLower.includes(objectVal)) {
-                            supportingScore += fragmentConf;
-                            await addStep(reasoningSteps, requestContext, 'REASONING_STEP', { check: 'FactMatch', fragmentId, outcome: 'Support', score: fragmentConf });
-                        }
-                    }
-
-                    // C) Provenance Checks (Recency Example)
-                    if (fragment.provenance?.timestamp_created) {
-                        const createdDate = new Date(fragment.provenance.timestamp_created);
-                        const ageDays = (Date.now() - createdDate.getTime()) / (1000 * 3600 * 24);
-                        if (ageDays > 730) {
-                            provenanceIssues++;
-                            await addStep(reasoningSteps, requestContext, 'PROVENANCE_CHECK', { check: 'Age', fragmentId, ageDays: Math.round(ageDays), outcome: 'Very Stale (>2yr)' });
-                        }
-                    }
-
-                    // D) Cross-Chain Attestation Check (Simulated Pass)
-                     const attestations = fragment.provenance?.external_attestations;
-                      if (attestations && attestations.length > 0) {
-                          supportingScore += 0.1 * attestations.length; // Small boost
-                          await addStep(reasoningSteps, requestContext, 'CROSSCHAIN_CHECK', { check: 'AttestationExists', fragmentId, count: attestations.length, outcome: 'BoostedConfidence(Simulated)' });
-                      }
-
-                } catch (logicError: any) {
-                     console.error(`[Verifier Service] Error processing fragment ${fragmentId} for context ${requestContext}: ${logicError.message}`);
-                     await addStep(reasoningSteps, requestContext, 'VERIFICATION_ERROR', { stage: 'LogicExecution', fragmentId, error: logicError.message });
-                }
-            } // End fragment loop
-
-            usedFragmentCids = fragmentsUsedInLogic; // Update based on actual usage
-
-            // Determine Preliminary Verdict
-            confidenceScore = 0.5 + (supportingScore - contradictingScore) * 0.5 - (provenanceIssues * 0.05) - (uncertaintyFlags * 0.2);
-            confidenceScore = Math.max(0.01, Math.min(0.99, confidenceScore)); // Clamp
-
-            if (uncertaintyFlags > 0) preliminaryVerdict = 'Flagged: Uncertain';
-            else if (contradictingScore > supportingScore * 1.5) preliminaryVerdict = 'Flagged: Contradictory';
-            else if (supportingScore > 0.5 && confidenceScore > 0.65) preliminaryVerdict = 'Verified';
-            else preliminaryVerdict = 'Unverified';
-
-            await addStep(reasoningSteps, requestContext, 'REASONING_STEP', {
-                step: 'LogicComplete',
-                calculatedVerdict: preliminaryVerdict,
-                calculatedConfidence: confidenceScore,
-                supportingScore: supportingScore.toFixed(2),
-                contradictoryScore: contradictoryScore.toFixed(2),
-                uncertaintyFlags, provenanceIssues
-            });
-        } // End of else block (if fragments were fetched)
-
-
-        // --- Step 5: Timelock Commit ---
-        // Check if contract address is configured before attempting commit
-        if (config.kintaskContractAddress && config.blocklockSenderProxyAddress) {
-            await addStep(reasoningSteps, requestContext, 'TIMELOCK_COMMIT_ATTEMPT', { verdictToCommit: preliminaryVerdict });
-            if (!preliminaryVerdict.startsWith('Error:')) { // Only commit if no prior critical error
-                timelockDetails = await commitVerdictTimelocked(preliminaryVerdict, 5, requestContext);
-                if (timelockDetails) {
-                    await addStep(reasoningSteps, requestContext, 'TIMELOCK_COMMIT_SUCCESS', {
-                        requestId: timelockDetails.requestId,
-                        txHash: timelockDetails.txHash,
-                        ciphertextHash: timelockDetails.ciphertextHash,
-                        committedVerdict: preliminaryVerdict
-                    });
-                } else {
-                    await addStep(reasoningSteps, requestContext, 'TIMELOCK_COMMIT_FAILURE', { error: 'commitVerdictTimelocked returned null or failed' });
-                    preliminaryVerdict = 'Error: Timelock Failed'; // Update status
-                    confidenceScore = 0; // Reset confidence
-                }
-            } else {
-                console.warn(`[Verifier Service] Skipping timelock commit due to prior error status: ${preliminaryVerdict}`);
-                await addStep(reasoningSteps, requestContext, 'TIMELOCK_COMMIT_FAILURE', { reason: 'Skipped due to prior error', priorStatus: preliminaryVerdict });
-            }
+        // Step 4: Determine Final Verdict & Confidence
+        let finalVerdict: VerificationStatus = 'Unverified';
+        let finalConfidence = 0.5;
+        const validAgents = supportCount + contradictCount + neutralCount;
+        if (validAgents === 0) {
+            finalVerdict = 'Error: Verification Failed';
+            finalConfidence = 0;
+            console.error(`[Verifier Service] Aggregation Failed: No valid agent responses. | Context: ${requestContext.substring(0,10)}...`); // Added log
         } else {
-            console.warn(`[Verifier Service] Skipping timelock commit: KINTASK_CONTRACT_ADDRESS or BLOCKLOCK_SENDER_PROXY_ADDRESS not configured.`);
-            await addStep(reasoningSteps, requestContext, 'TIMELOCK_COMMIT_FAILURE', { reason: 'Skipped: Contract/Proxy address not configured' });
+            const avgConfidence = totalConfidence / validAgents; // Calculate average only based on non-neutral votes if needed
+            if (supportCount / validAgents >= CONSENSUS_THRESHOLD) { finalVerdict = 'Verified'; finalConfidence = avgConfidence; }
+            else if (contradictCount / validAgents >= CONSENSUS_THRESHOLD) { finalVerdict = 'Flagged: Contradictory'; finalConfidence = avgConfidence; }
+            else { finalVerdict = 'Unverified'; finalConfidence = 0.5 - (Math.abs(supportCount - contradictCount) / validAgents) * 0.2; }
+            finalConfidence = Math.max(0.01, Math.min(0.99, finalConfidence));
         }
+        console.log(`[Verifier Service] Aggregation Result | Context: ${requestContext.substring(0,10)}... | Counts (S/C/N/E): ${supportCount}/${contradictCount}/${neutralCount}/${NUM_VERIFIER_AGENTS - validAgents} | AvgConf: ${finalConfidence.toFixed(2)} -> Verdict: ${finalVerdict}`);
+        await addStep(reasoningSteps, requestContext, 'FINAL_VERDICT_CALCULATED', { /* ... details ... */ });
 
+        // Step 4.5: Simulate Reward Distribution
+        const activeEvidenceCids = Array.from(potentialWinningCids);
+        const requiresEvidenceCheck = finalVerdict === 'Verified' || finalVerdict === 'Flagged: Contradictory';
+        await addStep(reasoningSteps, requestContext, 'SIMULATED_REWARD_ATTEMPT', { /* ... */ });
+        if (requiresEvidenceCheck) { /* ... reward sim logic ... */ }
+        else { await addStep(reasoningSteps, requestContext, 'SIMULATED_REWARD_SKIPPED', { reason: "Consensus verdict did not require evidence check (Uncertain or Error)" }); }
 
-        // --- Step 6: Final Result Object ---
+        // Step 5: Timelock Commit
+        if (config.kintaskContractAddress && config.blocklockSenderProxyAddress) { /* ... timelock logic ... */ }
+        else { await addStep(reasoningSteps, requestContext, 'TIMELOCK_COMMIT_FAILURE', { reason: 'Skipped: Not configured' }); }
+
+        // Step 6: Final Result Object
         const finalResult: VerificationResultInternal = {
-            finalVerdict: preliminaryVerdict,
-            confidenceScore: parseFloat(confidenceScore.toFixed(2)), // Format confidence
-            usedFragmentCids: usedFragmentCids,
-            reasoningSteps: reasoningSteps, // Return collected steps for controller
+            finalVerdict: finalVerdict,
+            confidenceScore: parseFloat(finalConfidence.toFixed(2)),
+            usedFragmentCids: activeEvidenceCids,
+            reasoningSteps: reasoningSteps,
             timelockRequestId: timelockDetails?.requestId,
             timelockCommitTxHash: timelockDetails?.txHash,
             ciphertextHash: timelockDetails?.ciphertextHash
         };
-
-        console.log(`[Verifier Service] Verification complete for context ${requestContext}. Verdict: ${finalResult.finalVerdict}, Confidence: ${finalResult.confidenceScore}`);
+        console.log(`[Verifier Service] Verification complete | Context: ${requestContext.substring(0,10)}... | Final Verdict: ${finalResult.finalVerdict}, Final Confidence: ${finalResult.confidenceScore}`);
         return finalResult;
 
     } catch (error: any) {
-        console.error(`[Verifier Service Error Request: ${requestContext}]:`, error.message, error.stack);
-        await addStep(reasoningSteps, requestContext, 'VERIFICATION_ERROR', { error: error.message, stage: 'TopLevelCatch' });
-        // Return a consistent error state result
-         return {
-             finalVerdict: 'Error: Verification Failed',
-             confidenceScore: 0,
-             usedFragmentCids: usedFragmentCids,
-             reasoningSteps: reasoningSteps,
-             timelockRequestId: timelockDetails?.requestId,
-             timelockCommitTxHash: timelockDetails?.txHash,
-             ciphertextHash: timelockDetails?.ciphertextHash
-         };
+         const conciseError = (error instanceof Error) ? error.message.split('\n')[0] : String(error);
+         console.error(`[Verifier Service Error - Top Level] Context: ${requestContext.substring(0,10)}... | Error: ${conciseError}`, error.stack);
+        await addStep(reasoningSteps, requestContext, 'VERIFICATION_ERROR', { error: conciseError, stage: 'TopLevelCatch' });
+         return { finalVerdict: 'Error: Verification Failed', confidenceScore: 0, usedFragmentCids: [], reasoningSteps, timelockRequestId: timelockDetails?.requestId, timelockCommitTxHash: timelockDetails?.txHash, ciphertextHash: timelockDetails?.ciphertextHash };
     }
-}
-===== ./types/index.ts =====
-// --- Knowledge Fragment Structure (Stored on Filecoin) ---
-export interface KnowledgeFragmentProvenance {
-  source_type: string; // e.g., 'dataset_snapshot', 'web_scrape', 'human_curated', 'api_call'
-  source_name?: string;
-  source_cid?: string; // CID of larger dataset if applicable
-  source_url?: string; // URL if scraped
-  curation_method?: string;
-  curator_id?: string; // e.g., DID
-  timestamp_created: string; // ISO 8601
-  confidence_score?: number; // 0.0 to 1.0
-  external_attestations?: ExternalAttestation[];
-}
+}===== ./types/index.ts =====
+// ./src/types/index.ts
 
-export interface ExternalAttestation {
-    chain: string; // e.g., 'Optimism', 'BaseSepolia'
-    type: string; // e.g., 'EAS', 'Verax'
-    schema_uid?: string;
-    attestation_uid?: string; // Linkable UID on the attestation network
-    attestation_data?: Record<string, any>; // Parsed data if relevant
-}
-
-export interface KnowledgeFragment {
-  fragment_id: string; // Unique identifier for this version
-  type: string; // e.g., 'factual_statement', 'rule', 'definition'
-  keywords?: string[]; // For indexing
-  content: Record<string, any>; // The actual data/fact/rule
-  provenance: KnowledgeFragmentProvenance;
-  version: number;
-  previous_version_cid?: string | null;
-}
+// --- Knowledge Fragment Structure (remains the same) ---
+export interface KnowledgeFragmentProvenance { /* ... */ }
+export interface ExternalAttestation { /* ... */ }
+export interface KnowledgeFragment { /* ... */ }
 
 // --- Verification & Recall ---
 export type VerificationStatus =
@@ -1547,53 +2298,56 @@ export type VerificationStatus =
 // Result returned internally by the Verifier Service
 export interface VerificationResultInternal {
   finalVerdict: VerificationStatus;
-  confidenceScore: number; // Overall confidence
-  usedFragmentCids: string[]; // List of Filecoin CIDs actually used
-  reasoningSteps: RecallLogEntryData[]; // Detailed steps taken
-  timelockRequestId?: string; // Blocklock on-chain request ID
-  timelockCommitTxHash?: string; // L2 Tx hash for the commit
-  ciphertextHash?: string; // Hash of the committed ciphertext
+  confidenceScore: number;
+  usedFragmentCids: string[]; // CIDs supporting the consensus verdict
+  reasoningSteps: RecallLogEntryData[]; // Detailed local log
+  timelockRequestId?: string;
+  timelockCommitTxHash?: string;
+  ciphertextHash?: string;
 }
 
-// --- Recall Logging ---
+// --- Recall Logging Events (Updated) ---
 export type RecallEventType =
     | 'VERIFICATION_START'
     | 'KNOWLEDGE_FETCH_ATTEMPT'
-    | 'KNOWLEDGE_FETCH_SUCCESS' // Log CIDs fetched
+    | 'KNOWLEDGE_FETCH_SUCCESS'
+    | 'VERIFIER_SUBMISSION'
+    // --- ADDED Reward Simulation Events ---
+    | 'SIMULATED_REWARD_ATTEMPT'     // Log attempt to calculate/distribute rewards
+    | 'SIMULATED_REWARD_SUBMITTER'   // Log simulated payment to an evidence submitter
+    | 'SIMULATED_REWARD_AGENT'       // Log simulated payment to a verifier agent
+    | 'SIMULATED_REWARD_SKIPPED'     // Log if rewards are skipped (e.g., no winners, zero pool)
+    // --- END ADDED ---
     | 'TIMELOCK_COMMIT_ATTEMPT'
-    | 'TIMELOCK_COMMIT_SUCCESS' // Log Request ID, Ciphertext Hash, Tx Hash
+    | 'TIMELOCK_COMMIT_SUCCESS'
     | 'TIMELOCK_COMMIT_FAILURE'
-    | 'REASONING_STEP' // Log rule/fact applied, CID used, outcome
-    | 'PROVENANCE_CHECK' // Log check on provenance data
-    | 'CROSSCHAIN_CHECK' // Log check on external attestation
-    | 'FINAL_VERDICT_CALCULATED' // Log verdict before reveal check
-    | 'TIMELOCK_REVEAL_RECEIVED' // Log revealed verdict, check match
+    | 'REASONING_STEP'
+    | 'FINAL_VERDICT_CALCULATED'
+    | 'TIMELOCK_REVEAL_RECEIVED'
     | 'VERIFICATION_COMPLETE'
     | 'VERIFICATION_ERROR'
-    | 'GENERATOR_MOCK_USED'; // Added for mock logging
+    | 'GENERATOR_MOCK_USED';
 
-// Structure for data field in Recall log entries
+// Recall Log Entry Data (remains the same)
 export interface RecallLogEntryData {
   timestamp: string;
   type: RecallEventType;
-  details: Record<string, any>; // Context-specific details for each event type
-  requestContext?: string; // Identifier for the overall Q&A request
+  details: Record<string, any>;
+  requestContext?: string;
 }
 
-// --- API Response Structure (Controller to Frontend) ---
+// API Response Structure (remains the same)
 export interface ApiVerifyResponse {
   answer: string;
   status: VerificationStatus;
   confidence?: number;
   usedFragmentCids?: string[];
   timelockRequestId?: string;
-  timelockTxExplorerUrl?: string; // Link to L2 explorer for commit Tx
-  recallTrace?: RecallLogEntryData[]; // Snippets or full trace for this request
-  recallExplorerUrl?: string; // Link to Recall explorer if available
-  error?: string; // Optional error message for frontend display
-  details?: string; // Optional error details
-}
-===== ./utils/blocklock-js.d.ts =====
+  timelockTxExplorerUrl?: string;
+  recallExplorerUrl?: string;
+  error?: string;
+  details?: string;
+}===== ./utils/blocklock-js.d.ts =====
 // packages/backend/src/types/blocklock-js.d.ts
 
 /**

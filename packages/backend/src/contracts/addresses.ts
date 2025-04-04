@@ -1,9 +1,12 @@
+// ./packages/backend/src/contracts/addresses.ts
 import config from '../config';
 
 export const KINTASK_COMMITMENT_CONTRACT_ADDRESS = config.kintaskContractAddress || '';
+export const FVM_AGGREGATOR_CONTRACT_ADDRESS = config.fvmAggregatorContractAddress || '';
 
-// Add other contract addresses if needed
-
-if (!KINTASK_COMMITMENT_CONTRACT_ADDRESS && process.env.NODE_ENV !== 'test') { // Don't warn during tests maybe
-    console.warn("Backend Config Warning: KintaskCommitment Contract address (KINTASK_CONTRACT_ADDRESS) is not set in .env!");
+if (!KINTASK_COMMITMENT_CONTRACT_ADDRESS && process.env.NODE_ENV !== 'test') {
+    console.warn("Backend Config Warning: KINTASK_CONTRACT_ADDRESS is not set in .env!");
+}
+if (!FVM_AGGREGATOR_CONTRACT_ADDRESS && process.env.NODE_ENV !== 'test') {
+    console.warn("Backend Config Warning: FVM_AGGREGATOR_CONTRACT_ADDRESS is not set in .env!");
 }

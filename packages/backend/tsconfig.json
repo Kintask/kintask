@@ -1,26 +1,25 @@
-// kintask/packages/backend/tsconfig.json
 {
   "compilerOptions": {
-    "target": "ES2022",        // Use a target that supports modern features like top-level await
-    "module": "NodeNext",     // <--- CHANGE: Use NodeNext module system
+    "target": "ES2022",        // Modern target supporting TLA
+    "module": "NodeNext",     // Use NodeNext module system
     "outDir": "./dist",
     "rootDir": "./src",
     "strict": true,
-    "esModuleInterop": true,    // Keep enabled, generally helpful
+    "esModuleInterop": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
-    "moduleResolution": "NodeNext", // <--- CHANGE: Use NodeNext resolution
+    "moduleResolution": "NodeNext", // Use NodeNext resolution
     "sourceMap": true,
     "baseUrl": "./",
     "paths": {
       "@/*": ["src/*"]
     }
-    // Ensure no "types" array limiting type lookups if present
+    // Remove any explicit "types": [...] array if present, let TS infer
   },
-  "ts-node": { // Add ts-node config if using it directly (ts-node-dev uses it)
-    "esm": true, // Tell ts-node to handle ESM potential
-    "experimentalSpecifierResolution": "node" // May help resolution
+  "ts-node": { // Configuration for ts-node/ts-node-dev
+    "esm": true, // Indicates potential ESM usage
+    "experimentalSpecifierResolution": "node" // Helps resolve modules
   },
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist"]

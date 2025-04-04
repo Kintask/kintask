@@ -1,22 +1,22 @@
 {
-  "name": "kintask-monorepo",
+  "name": "kintask-scripts",
   "version": "1.0.0",
   "private": true,
-  "description": "Monorepo for Kintask: Modular, Attributable & Fair AI Q&A",
+  "description": "Utility scripts for Kintask project",
+  "main": "upload-kg-fragments.js",
+  "type": "module",
   "scripts": {
-    "contracts:compile": "pnpm --filter kintask-contracts compile",
-    "contracts:deploy": "pnpm --filter kintask-contracts exec hardhat ignition deploy ignition/modules/KintaskCommitment.ts --network",
-    "backend:dev": "pnpm --filter backend dev",
-    "frontend:dev": "pnpm --filter frontend dev",
-    "dev": "pnpm --parallel --filter \"./packages/**\" dev",
-    "build": "pnpm --filter \"./packages/**\" build",
-    "kg:upload": "pnpm --filter kintask-scripts upload"
+    "upload": "node upload-paper.js",
+    "generate-index": "node generate-kg-index.js"
   },
-  "devDependencies": {
-    "typescript": "^5.3.3"
-  },
-  "engines": {
-    "node": ">=18",
-    "pnpm": ">=8"
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@types/node": "^20.11.0",
+    "@web3-storage/w3up-client": "^14.0.0",
+    "axios": "^1.6.8",
+    "dotenv": "^16.4.5",
+    "files-from-path": "^1.0.3"
   }
 }
