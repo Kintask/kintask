@@ -9,7 +9,7 @@ const config = {
   openRouterApiKey: process.env.OPENROUTER_API_KEY, // Or OPENAI_API_KEY
   w3upAgentEmail: process.env.W3UP_AGENT_EMAIL,
   kintaskSpaceDid: process.env.KINTASK_SPACE_DID,
-  knowledgeBaseIndexCid: process.env.KB_INDEX_CID, // Points to the paper CID
+  // knowledgeBaseIndexCid: process.env.KB_INDEX_CID, // Removed: Now provided per-request
   ipfsGatewayUrl: process.env.IPFS_GATEWAY_URL || 'https://w3s.link/ipfs/',
   recallPrivateKey: process.env.RECALL_PRIVATE_KEY,
   recallLogBucket: process.env.RECALL_LOG_BUCKET,
@@ -24,7 +24,7 @@ const requiredEnvVars: Array<keyof typeof config> = [
     'openRouterApiKey', // Or OPENAI_API_KEY
     'w3upAgentEmail',
     'kintaskSpaceDid',
-    'knowledgeBaseIndexCid',
+    // 'knowledgeBaseIndexCid', // Removed
     'l2RpcUrl',
     'walletPrivateKey',
     'kintaskContractAddress',

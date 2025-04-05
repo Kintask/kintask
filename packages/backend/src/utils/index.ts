@@ -30,3 +30,17 @@ export function truncateText(text: string | undefined | null, maxLength: number)
     if (text.length <= maxLength) return text;
     return text.substring(0, maxLength - 3) + '...';
 }
+
+/**
+ * Basic CID validation (checks format).
+ * @param cid The string to validate.
+ * @returns True if the string looks like a CID, false otherwise.
+ */
+export function isValidCid(cid: string): boolean {
+    if (!cid || typeof cid !== 'string') {
+        return false;
+    }
+    // Basic checks for common CID formats (v0: Qm..., v1: bafy..., bafk...)
+    // This is not exhaustive but covers most common cases.
+    return cid.startsWith('Qm') || cid.startsWith('bafy') || cid.startsWith('bafk');
+}
