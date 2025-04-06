@@ -4,7 +4,7 @@
   "private": true,
   "main": "dist/server.js",
   "scripts": {
-    "dev": "ts-node-dev --respawn --transpile-only --clear src/server.ts",
+    "dev": "tsc && ts-node-dev --respawn --transpile-only --clear src/server.ts",
     "build": "tsc",
     "start": "node dist/server.js",
     "lint": "eslint src/**/*.ts"

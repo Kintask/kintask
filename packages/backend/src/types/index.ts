@@ -1,173 +1,199 @@
 // types/index.ts
 
 // --- Knowledge Fragment Types ---
-// (Keep as is or remove if unused)
-export interface KnowledgeFragmentProvenance { /* ... */ }
-export interface ExternalAttestation { /* ... */ }
-export interface KnowledgeFragment { /* ... */ }
+// Basic structures, can be expanded if needed
+export interface KnowledgeFragmentProvenance {
+    sourceType?: 'research_paper' | 'web_page' | 'user_upload' | 'derived';
+    sourceUri?: string;
+    retrievalDate?: string; // ISO 8601
+    originalAuthor?: string;
+    publicationDate?: string;
+}
+export interface ExternalAttestation {
+    attestorId: string;
+    claimCid: string;
+    verdict: 'Supported' | 'Contradicted' | 'Neutral';
+    confidence?: number;
+    timestamp: string; // ISO 8601
+    signature?: string;
+}
+export interface KnowledgeFragment {
+    cid: string;
+    content: string;
+    metadata?: { title?: string; keywords?: string[]; chunkIndex?: number; };
+    provenance?: KnowledgeFragmentProvenance;
+    attestations?: ExternalAttestation[];
+    embedding?: number[];
+}
+
+// --- LLM Verification Result Structure (Used by generator/verifier/evaluator) ---
+// Define and Export this interface
+export interface LLMVerificationResult {
+    verdict: 'Supported' | 'Contradicted' | 'Neutral'; // For claim verification
+    confidence: number; // 0.0 - 1.0
+    explanation?: string; // Brief explanation
+}
+
+// Define Evaluation-specific result structure
+export interface LLMEvaluationResult {
+    evaluation: 'Correct' | 'Incorrect' | 'Uncertain'; // For answer evaluation
+    confidence: number; // 0.0 - 1.0
+    explanation?: string; // Brief explanation
+}
 
 
-// --- Verification Status (For final aggregated result or synchronous flow) ---
+// --- Verification Status (Final outcome of evaluation/aggregation) ---
 export type VerificationStatus =
     | 'Verified'
     | 'Unverified'
     | 'Flagged: Contradictory'
-    | 'Flagged: Uncertain' // <-- Added
+    | 'Flagged: Uncertain'
     | 'Error: Verification Failed'
     | 'Error: Aggregation Failed'
     | 'Error: Timelock Failed';
 
 
-// --- Asynchronous Job Statuses (Used in Recall objects) ---
+// --- Asynchronous Job Statuses (Used in Recall objects & Status API) ---
 export type JobStatus =
     | 'PendingAnswer'
-    | 'PendingVerification'
-    | 'VerificationInProgress'
-    | 'PendingAggregation'
-    | 'AggregationInProgress'
-    | 'Completed'
-    | 'Error';
+    | 'PendingEvaluation'     // Answers submitted, waiting for evaluation
+    | 'EvaluationInProgress'  // Evaluation agent is processing this context
+    | 'PendingPayout'         // Evaluation complete, results logged, waiting for payout agent
+    | 'PayoutInProgress'      // Payout agent is processing this context
+    | 'PayoutComplete'        // Payout processing finished (check payout log for details)
+    | 'Completed'             // Alternative final state if PayoutComplete isn't used
+    | 'NoValidAnswers'        // Evaluation finished, but no answers deemed 'Correct'
+    | 'Error';                // Error occurred at some stage (check error logs)
 
 
 // --- Data Structures Stored in Recall ---
+
+// Stored under: questions/{requestContext}.json
 export interface QuestionData {
     question: string;
     cid: string; // Knowledge Base CID
-    status: JobStatus | 'PendingAnswer';
-    timestamp: string; // ISO 8601
-    requestContext: string;
+    status: JobStatus; // Tracks the overall status of the request
+    timestamp: string; // ISO 8601 submission time
+    requestContext: string; // Unique ID for the entire flow
     userId?: string;
     paymentRef?: string;
     callbackUrl?: string;
 }
 
+// Stored under: answers/{requestContext}/{agentId}.json
 export interface AnswerData {
     answer: string;
-    answeringAgentId: string;
-    status: JobStatus | 'PendingVerification';
-    timestamp: string; // ISO 8601
-    requestContext: string;
-    confidence?: number;
-    modelUsed?: string;
+    answeringAgentId: string; // e.g., the agent's public key address
+    status: 'Submitted'; // Status for this specific answer entry
+    timestamp: string; // ISO 8601 answering time
+    requestContext: string; // Link back to the question
+    confidence?: number; // Optional: Confidence score from answering agent
+    modelUsed?: string; // Optional: LLM model used by agent
 }
 
+// Stored under: verdicts/{requestContext}/{verifierAgentId}.json (If separate verification step exists)
 export interface VerdictData {
-    verdict: 'Correct' | 'Incorrect' | 'Uncertain';
+    verdict: 'Correct' | 'Incorrect' | 'Uncertain'; // Verifier's opinion
     confidence: number;
     explanation?: string;
     verifyingAgentId: string;
-    timestamp: string; // ISO 8601
+    timestamp: string;
     requestContext: string;
     evidenceSnippets?: { startChar: number; endChar: number }[];
 }
 
-// --- API Response for Status Check ---
+// Stored under: evaluation/{requestContext}.json
+export interface EvaluationResult {
+    evaluatorAgentId: string; // ID of the backend/agent performing the evaluation
+    timestamp: string; // ISO 8601 when evaluation was completed & logged
+    requestContext: string;
+    // Array of evaluations for each answer submitted for this context
+    results: Array<{
+        answeringAgentId: string; // ID of the agent whose answer was evaluated
+        answerKey: string; // Recall key of the specific answer evaluated
+        evaluation: 'Correct' | 'Incorrect' | 'Uncertain'; // Judge LLM's verdict
+        confidence?: number; // Judge LLM's confidence in its evaluation
+        explanation?: string; // Judge LLM's reasoning
+    }>;
+    // Status reflects the outcome of the evaluation process for this requestContext
+    // Added 'PayoutComplete' based on error TS2322
+    status: 'PendingPayout' | 'Error' | 'NoValidAnswers' | 'PayoutComplete';
+}
+
+// Stored under: payouts/{requestContext}.json
+export interface PayoutStatusData {
+    payoutAgentId: string; // ID of the backend/agent initiating payout
+    payoutTimestamp: string; // ISO 8601 when payout processing was logged
+    requestContext: string;
+    stage: string; // Last attempted stage (e.g., RegisterAgent_abc, SubmitResult_abc, TriggerAggregation)
+    success: boolean; // Overall success of the payout process attempt for this context
+    message: string; // Summary message (e.g., "Processed 2 payouts", "Aggregation failed")
+    txHashes: Record<string, string>; // Record of relevant transaction hashes
+}
+
+
+// --- API Response for Status Check (`GET /api/status/{requestContext}`) ---
 export interface RequestStatus {
     requestContext: string;
-    status: JobStatus | 'Not Found' | 'Error';
+    status: JobStatus | 'Not Found' | 'Error'; // Overall derived status
     question?: string;
     cid?: string;
     submittedAt: string;
-    answer?: string;
-    answeredAt?: string;
-    answeringAgentId?: string;
-    verificationSummary?: {
-        correctCount: number;
-        incorrectCount: number;
-        uncertainCount: number;
-        averageConfidence?: number;
-    };
-    finalVerdict?: VerificationStatus;
-    finalVerdictTimestamp?: string;
+    hasAnswers?: boolean;
+    answerCount?: number;
+    evaluationStatus?: EvaluationResult['status']; // Status from the evaluation object
+    payoutStatus?: PayoutStatusData['success']; // true/false if processing occurred
+    payoutMessage?: string;
+    finalVerdict?: VerificationStatus; // If available from contract or final state
     error?: string;
+    // Removed 'evaluation' field to avoid returning potentially large nested object
 }
 
-// --- Recall Logging Event Types (Expanded) ---
-export type RecallEventType =
-    // Core Flow Events
-    | 'QUESTION_LOGGED'
-    | 'ANSWER_LOGGED'
-    | 'VERDICT_LOGGED'
-    | 'ERROR_LOGGED'
-    // Agent/Tracing Events
-    | 'AGENT_POLL'
-    | 'AGENT_JOB_START'
-    | 'AGENT_KB_FETCH_START'
-    | 'AGENT_KB_FETCH_SUCCESS'
-    | 'AGENT_KB_FETCH_FAILURE'
-    | 'AGENT_LLM_CALL_START'
-    | 'AGENT_LLM_CALL_SUCCESS'
-    | 'AGENT_LLM_CALL_FAILURE'
-    | 'AGENT_FVM_CALL_START'
-    | 'AGENT_FVM_CALL_SUCCESS'
-    | 'AGENT_FVM_CALL_FAILURE'
-    | 'AGENT_JOB_COMPLETE'
-    | 'AGENT_ERROR'
-    // Aggregation/Finalization Events
-    | 'AGGREGATION_TRIGGERED'
-    | 'AGGREGATION_COMPLETE'
-    | 'REWARD_DISTRIBUTION_START'
-    | 'REWARD_DISTRIBUTION_COMPLETE'
-    // Events from older/verifier service flow (ensure all used strings are here)
-    | 'VERIFICATION_START'         // <-- Added
-    | 'KNOWLEDGE_FETCH_ATTEMPT'    // <-- Added
-    | 'KNOWLEDGE_FETCH_SUCCESS'    // <-- Added (Redundant with AGENT_KB_FETCH_SUCCESS? Keep if used)
-    | 'TIMELOCK_COMMIT_ATTEMPT'    // <-- Added
-    | 'TIMELOCK_COMMIT_SUCCESS'    // <-- Added
-    | 'TIMELOCK_COMMIT_FAILURE'    // <-- Added
-    | 'TIMELOCK_REVEAL_RECEIVED'   // <-- Added
-    | 'VERIFICATION_COMPLETE'      // <-- Added
-    | 'REASONING_STEP'             // <-- Added (For local steps array)
-    | 'VERIFICATION_ERROR'         // <-- Added (Generic error)
-    | 'GENERATOR_MOCK_USED'        // <-- Kept if relevant
-    ;
 
-
-// Recall Log Entry Data (Used for local traces and potentially detailed Recall logs)
-export interface RecallLogEntryData {
-  timestamp: string; // ISO 8601
-  type: RecallEventType;
-  details: Record<string, any>;
-  requestContext?: string;
-  agentId?: string;
-  correlationId?: string;
-  durationMs?: number;
-  errorDetails?: string;
-}
-
-// --- Internal Result Structure (Used by synchronous verifyController/verifierService) ---
+// --- Internal Result Structure (Used by synchronous /verify flow) ---
 export interface VerificationResultInternal {
   finalVerdict: VerificationStatus;
   confidenceScore: number;
   usedFragmentCids: string[];
-  reasoningSteps: RecallLogEntryData[]; // <-- Added
+  reasoningSteps: RecallLogEntryData[]; // Local trace for sync flow
   timelockRequestId?: string;
   timelockCommitTxHash?: string;
   ciphertextHash?: string;
-  aggregationTxHash?: string;
+  aggregationTxHash?: string; // If sync flow interacts with aggregator
 }
 
-// --- API Response for Initial Ask Request ---
-export interface ApiAskResponse {
-    message: string;
-    requestContext: string;
-    recallKey: string;
+// --- Recall Logging Event Types ---
+// Comprehensive list covering both sync and async flows
+export type RecallEventType =
+    | 'QUESTION_LOGGED' | 'ANSWER_LOGGED' | 'VERDICT_LOGGED' | 'EVALUATION_LOGGED' | 'PAYOUT_LOGGED' | 'ERROR_LOGGED'
+    | 'AGENT_POLL' | 'AGENT_JOB_START' | 'AGENT_KB_FETCH_START' | 'AGENT_KB_FETCH_SUCCESS' | 'AGENT_KB_FETCH_FAILURE'
+    | 'AGENT_LLM_CALL_START' | 'AGENT_LLM_CALL_SUCCESS' | 'AGENT_LLM_CALL_FAILURE'
+    | 'AGENT_FVM_CALL_START' | 'AGENT_FVM_CALL_SUCCESS' | 'AGENT_FVM_CALL_FAILURE' | 'AGENT_JOB_COMPLETE' | 'AGENT_ERROR'
+    | 'AGGREGATION_TRIGGERED' | 'AGGREGATION_COMPLETE' | 'REWARD_DISTRIBUTION_START' | 'REWARD_DISTRIBUTION_COMPLETE'
+    | 'VERIFICATION_START' | 'KNOWLEDGE_FETCH_ATTEMPT' | 'KNOWLEDGE_FETCH_SUCCESS'
+    | 'TIMELOCK_COMMIT_ATTEMPT' | 'TIMELOCK_COMMIT_SUCCESS' | 'TIMELOCK_COMMIT_FAILURE' | 'TIMELOCK_REVEAL_RECEIVED'
+    | 'VERIFICATION_COMPLETE' | 'REASONING_STEP' | 'VERIFICATION_ERROR'
+    | 'GENERATOR_MOCK_USED' ;
+
+
+// Recall Log Entry Data (For detailed tracing if implemented)
+export interface RecallLogEntryData {
+  timestamp: string; type: RecallEventType; details: Record<string, any>;
+  requestContext?: string; agentId?: string; correlationId?: string;
+  durationMs?: number; errorDetails?: string;
 }
 
-// --- API Response for Direct Verification (/verify endpoint) ---
-export interface ApiVerifyResponse {
-  answer: string; // Generated CLAIM
-  status: VerificationStatus; // Final verdict from sync process
-  confidence?: number;
-  usedFragmentCids?: string[];
-  timelockRequestId?: string;
-  timelockTxExplorerUrl?: string;
-  // Optional: Link to status check or provide trace directly
-  statusCheckUrl?: string;
-  recallTrace?: RecallLogEntryData[]; // <-- Added
-  recallExplorerUrl?: string;
-  error?: string; // Error message if processing failed
-  details?: string; // More details on the error
-  requestContext?: string;
+// --- API Responses ---
+export interface ApiAskResponse { message: string; requestContext: string; recallKey: string; }
+export interface ApiVerifyResponse { // For Sync /verify flow
+  answer: string; status: VerificationStatus; confidence?: number; usedFragmentCids?: string[];
+  timelockRequestId?: string; timelockTxExplorerUrl?: string; statusCheckUrl?: string;
+  recallTrace?: RecallLogEntryData[]; recallExplorerUrl?: string; error?: string;
+  details?: string; requestContext?: string;
 }
-// ==== ./types/index.ts ====
+
+// Declaration for formatGwei helper used in recallService logging
+// Note: This is just a type declaration, the implementation is in recallService.ts
+declare function formatGwei(value: bigint): string;
+
+// ==== ./src/types/index.ts ====

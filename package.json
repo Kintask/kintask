@@ -10,7 +10,8 @@
     "frontend:dev": "pnpm --filter frontend dev",
     "dev": "pnpm --parallel --filter \"./packages/**\" dev",
     "build": "pnpm --filter \"./packages/**\" build",
-    "kg:upload": "pnpm --filter kintask-scripts upload"
+    "kg:upload": "pnpm --filter kintask-scripts upload",
+    "start:agent": "pnpm --filter kintask-scripts start-agent"
   },
   "devDependencies": {
     "@web-std/file": "^3.0.3",
