@@ -3,6 +3,7 @@ pragma solidity 0.8.24;
 
 import {TypesLib} from "blocklock-solidity/src/libraries/TypesLib.sol";
 import {AbstractBlocklockReceiver} from "blocklock-solidity/src/AbstractBlocklockReceiver.sol";
+import "hardhat/console.sol";
 
 // Renamed contract
 contract KintaskCommitment is AbstractBlocklockReceiver {
