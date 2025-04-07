@@ -1,3 +1,4 @@
+// ./config.ts
 // ./packages/backend/src/config.ts
 import dotenv from 'dotenv';
 import path from 'path';
@@ -121,4 +122,4 @@ type FinalConfig = Readonly<
 const finalConfig = loadedConfig as FinalConfig; // Assert type after validation
 
 export default finalConfig;
-// ==== ./packages/backend/src/config.ts ====
+// ==== ./packages/backend/src/config.ts =====

@@ -1,11 +1,10 @@
-// services/recallService.ts (LEAN Version + Gas Check - Fixed Exports/Types/Imports)
+// services/recallService.ts (LEAN Version + Gas Check + Manual Gas Limit + Overwrite Fixed)
 import config from '../config';
-import { QuestionData, AnswerData, VerdictData, RequestStatus, RecallLogEntryData, RecallEventType, VerificationResultInternal, EvaluationResult, JobStatus } from '../types';
+import { QuestionData, AnswerData, VerdictData, RequestStatus, RecallLogEntryData, RecallEventType, VerificationResultInternal, EvaluationResult, JobStatus, PayoutStatusData } from '../types'; // Ensure all used types are imported
 import { testnet } from '@recallnet/chains';
 import {
     createWalletClient, http, parseEther, formatEther, WalletClient, PublicClient, createPublicClient,
-    BaseError, Address, ContractFunctionExecutionError, getAddress, parseGwei,
-    formatGwei // Import formatGwei directly from viem
+    BaseError, Address, ContractFunctionExecutionError, getAddress, parseGwei, formatGwei // Import formatGwei directly from viem
 } from 'viem';
 import { privateKeyToAccount, Account } from 'viem/accounts';
 import { truncateText } from '../utils';
@@ -33,11 +32,16 @@ const txQueue: Array<() => Promise<any>> = [];
 // --- NO approvedBuckets cache in LEAN version ---
 
 // --- Constants & Prefixes ---
-const MAX_RPC_RETRIES = 3; // Restore retries
+const MAX_RPC_RETRIES = 100; // Restore retries
 const RETRY_DELAY_MS = 1500;
-const QUESTIONS_PREFIX = "questions/"; const ANSWERS_PREFIX = "answers/"; const VERDICTS_PREFIX = "verdicts/"; const ERRORS_PREFIX = "errors/"; const FINAL_RESULTS_PREFIX = "final_results/"; const TIMELOCK_REVEALS_PREFIX = "timelock_reveals/";
-const EVALUATION_RECALL_PREFIX = "evaluation/"; // Add prefix used by evaluation service
-const PAYOUT_RECALL_PREFIX = "payouts/"; // Add prefix used by payout service
+const QUESTIONS_PREFIX = "questions/";
+const ANSWERS_PREFIX = "answers/";
+const VERDICTS_PREFIX = "verdicts/"; // For individual agent verdicts in consensus model
+const EVALUATION_RECALL_PREFIX = "evaluation/"; // For evaluator agent results
+const PAYOUT_RECALL_PREFIX = "payouts/"; // For payout agent results
+const ERRORS_PREFIX = "errors/";
+const FINAL_RESULTS_PREFIX = "final_results/"; // For final results/traces of sync flow
+const TIMELOCK_REVEALS_PREFIX = "timelock_reveals/";
 
 // --- Gas Settings ---
 const MAX_ACCEPTABLE_PRIORITY_FEE_GWEI = '10'; // Example threshold
@@ -177,16 +181,23 @@ async function checkAndBuyRecallCreditsIfNeeded(recall: any): Promise<void> {
             console.log('Recall Credit purchase tx sent:', txHash);
             await new Promise(resolve => setTimeout(resolve, 2000));
         } catch (buyError: any) {
-            console.error(`[Recall Service] FAILED to buy Recall Credits: ${buyError.message}.`);
-            throw new Error(`Failed to ensure Recall Credit balance: ${buyError.message}`);
+             console.error(`[Recall Service] FAILED to buy Recall Credits: ${buyError.message}.`);
+             throw new Error(`Failed to ensure Recall Credit balance: ${buyError.message}`);
         }
     }
 }
 
 
-// --- LEAN Core Function to Add Object with Gas Check + Manual Limit ---
+// --- LEAN Core Function to Add Object with Overwrite Option ---
+/**
+ * Adds dataObject. Checks gas fees. Allows overwriting.
+ * Assumes bucket exists, is approved, credits ok for ADD.
+ * *** Exported ***
+ */
 export async function addObjectToBucket(
-    dataObject: object, key: string
+    dataObject: object,
+    key: string,
+    overwrite: boolean = false // Default overwrite to false
 ): Promise<{ success: boolean, bucket?: Address, key?: string, txHash?: string, error?: string, gasPriceTooHigh?: boolean }> {
     let recall: any; let bucketAddr: Address;
     const currentAccount = initializeAccount(); // Ensure account is initialized
@@ -197,13 +208,13 @@ export async function addObjectToBucket(
         bucketAddr = await findLogBucketAddressOrFail(recall);
 
         const balance = await publicClient.getBalance({ address: currentAccount.address });
-        console.log(`[Recall Service - addObjectToBucket MANUAL_GAS] Native Balance for ${currentAccount.address}: ${formatEther(balance)}`);
+        console.log(`[Recall Service - addObjectToBucket OVW] Native Balance for ${currentAccount.address}: ${formatEther(balance)}`);
 
-        await checkAndBuyRecallCreditsIfNeeded(recall);
+        await checkAndBuyRecallCreditsIfNeeded(recall); // Check Recall credits
 
     } catch (setupError: any) {
         const errMsg = setupError?.message?.split('\n')[0] || String(setupError);
-        console.error(`[Recall Setup Error - MANUAL_GAS] addObjectToBucket for key ${key}:`, errMsg);
+        console.error(`[Recall Setup Error - OVW] addObjectToBucket for key ${key}:`, errMsg);
         return { success: false, error: `Setup failed: ${errMsg}`, key };
     }
 
@@ -211,116 +222,148 @@ export async function addObjectToBucket(
     const fileBuffer = Buffer.from(contentStr, 'utf8');
     const bucketManager = recall.bucketManager();
 
-    // --- Transaction Attempt with Retries & Manual Gas ---
+    // --- Transaction Attempt with Retries & Gas Check ---
     for (let attempt = 1; attempt <= MAX_RPC_RETRIES; attempt++) {
         try {
-            console.log(`[Recall Service MANUAL_GAS] Attempt ${attempt}/${MAX_RPC_RETRIES} to add object | Key: ${key}`);
+            console.log(`[Recall Service OVW] Attempt ${attempt}/${MAX_RPC_RETRIES} to add object | Key: ${key} | Overwrite: ${overwrite}`);
 
             const txHash = await processTxQueue(async () => {
-                console.log(`[Recall Tx Queue MANUAL_GAS] Checking gas fees before tx...`);
-                const feeEstimate = await publicClient!.estimateFeesPerGas();
-                const currentMaxPriorityFee = feeEstimate.maxPriorityFeePerGas ?? 0n;
-                // Use imported formatGwei
-                console.log(`[Recall Tx Queue MANUAL_GAS] Estimated maxPriorityFeePerGas: ${formatGwei(currentMaxPriorityFee)} Gwei`);
+                 // --- Gas Price Check ---
+                 console.log(`[Recall Tx Queue OVW] Checking gas fees before tx...`);
+                 const feeEstimate = await publicClient!.estimateFeesPerGas();
+                 const currentMaxPriorityFee = feeEstimate.maxPriorityFeePerGas ?? 0n;
+                 console.log(`[Recall Tx Queue OVW] Estimated maxPriorityFeePerGas: ${formatGwei(currentMaxPriorityFee)} Gwei`);
+                 if (currentMaxPriorityFee > MAX_ACCEPTABLE_PRIORITY_FEE_WEI) {
+                     const errorMsg = `Gas price too high: Current priority fee (${formatGwei(currentMaxPriorityFee)} Gwei) exceeds threshold (${MAX_ACCEPTABLE_PRIORITY_FEE_GWEI} Gwei)`;
+                     console.warn(`[Recall Tx Queue OVW] ${errorMsg}. Aborting transaction for key ${key}.`);
+                     throw new Error(`GAS_PRICE_TOO_HIGH: ${errorMsg}`);
+                 }
+                 console.log(`[Recall Tx Queue OVW] Gas price acceptable. Proceeding with add tx (Overwrite: ${overwrite})...`);
+                 const balanceBeforeTx = await publicClient!.getBalance({ address: currentAccount.address });
+                 console.log(`[Recall Tx Queue OVW] Native Balance right before add tx: ${formatEther(balanceBeforeTx)}`);
+                 // --- End Gas Price Check ---
 
-                if (currentMaxPriorityFee > MAX_ACCEPTABLE_PRIORITY_FEE_WEI) {
-                    const errorMsg = `Gas price too high: Current priority fee (${formatGwei(currentMaxPriorityFee)} Gwei) exceeds threshold (${MAX_ACCEPTABLE_PRIORITY_FEE_GWEI} Gwei)`;
-                    console.warn(`[Recall Tx Queue MANUAL_GAS] ${errorMsg}. Aborting transaction for key ${key}.`);
-                    throw new Error(`GAS_PRICE_TOO_HIGH: ${errorMsg}`);
-                }
+                 // --- Correctly pass arguments based on SDK structure ---
+                 // Assume options object is last argument containing gas and overwrite
+                 const callOptions: { gas?: bigint, overwrite?: boolean } = {
+                     gas: MANUAL_GAS_LIMIT, // Include manual gas limit
+                 };
+                 if (overwrite) {
+                     callOptions.overwrite = true; // Set overwrite only if true
+                 }
 
-                console.log(`[Recall Tx Queue MANUAL_GAS] Gas price acceptable. Proceeding with add tx with MANUAL limit: ${MANUAL_GAS_LIMIT}...`);
-                const balanceBeforeTx = await publicClient!.getBalance({ address: currentAccount.address });
-                console.log(`[Recall Tx Queue MANUAL_GAS] Native Balance right before add tx: ${formatEther(balanceBeforeTx)}`);
+                 // Call with the structured options object
+                 const { meta } = await bucketManager.add(bucketAddr, key, fileBuffer, callOptions);
 
-                const txOptions = { gas: MANUAL_GAS_LIMIT };
-                // *** Confirm this is the correct way to pass overrides for recall SDK ***
-                const { meta } = await bucketManager.add(bucketAddr, key, fileBuffer, txOptions); // Example: options as last arg
-
-                return meta?.tx?.transactionHash;
+                 return meta?.tx?.transactionHash;
             });
 
-            if (!txHash) { console.warn(`[Recall Service MANUAL_GAS] addObjectToBucket for key ${key} (Attempt ${attempt}) ended with no txHash. Assuming success.`); return { success: true, bucket: bucketAddr, key }; }
-            console.log(`[Recall Service MANUAL_GAS] Object stored (Attempt ${attempt}). Key=${key.split('/').pop()}, Tx=${txHash.slice(0, 12)}...`);
-            return { success: true, bucket: bucketAddr, key, txHash };
+            if (!txHash) { console.warn(`[Recall Service OVW] addObjectToBucket for key ${key} (Attempt ${attempt}) ended with no txHash. Assuming success.`); return { success: true, bucket: bucketAddr, key }; }
+            console.log(`[Recall Service OVW] Object stored/overwritten (Attempt ${attempt}). Key=${key.split('/').pop()}, Tx=${txHash.slice(0, 12)}...`);
+            return { success: true, bucket: bucketAddr, key, txHash }; // Success!
 
         } catch (err: any) {
-            let conciseError = `Attempt ${attempt} failed adding object (key=${truncateText(key, 30)})`;
-            let isRetryable = false; let isGasError = false; let isGasPriceError = false;
+            let conciseError = `Attempt ${attempt} failed adding/overwriting object (key=${truncateText(key, 30)})`;
+            let isRetryable = false; let isGasError = false; let isGasPriceError = false; let isKeyExistsError = false;
 
-            if (err instanceof Error && err.message.startsWith('GAS_PRICE_TOO_HIGH:')) { conciseError = err.message; isGasPriceError = true; isRetryable = false; console.warn(`[Recall Service MANUAL_GAS] Transaction deferred due to high gas price (Attempt ${attempt}) for key ${key}`); }
+            if (err instanceof Error && err.message.startsWith('GAS_PRICE_TOO_HIGH:')) { conciseError = err.message; isGasPriceError = true; isRetryable = false; console.warn(`[Recall Service OVW] Transaction deferred due to high gas price (Attempt ${attempt}) for key ${key}`); }
             else if (err instanceof BaseError) {
                 conciseError = `Attempt ${attempt}: ${err.shortMessage || err.message.split('\n')[0]}`;
-                if (err.message?.toLowerCase().includes('out of gas')) { console.error(`[Recall Service MANUAL_GAS] >> TRANSACTION RAN OUT OF GAS (Attempt ${attempt}) for key ${key}. Increase MANUAL_GAS_LIMIT.`); isRetryable = false; isGasError = true; }
-                else if (err.message?.includes('actor balance') && err.message?.includes('less than needed')) { console.error(`[Recall Service MANUAL_GAS] >> Detected insufficient NATIVE GAS balance error (Attempt ${attempt}) for key ${key}`); isRetryable = false; isGasError = true; }
-                else if (err.name === 'HttpRequestError' || err.message.includes('RPC Request failed') || err.message.includes('nonce') || err.message.includes('timeout')) { isRetryable = true; }
-                console.error(`[Recall Service MANUAL_GAS] addObjectToBucket Viem Error (Attempt ${attempt})`, { key, name: err.name });
-            } else if (err instanceof Error) { conciseError = `Attempt ${attempt}: ${err.message.split('\n')[0]}`; console.error(`[Recall Service MANUAL_GAS] addObjectToBucket Generic Error (Attempt ${attempt})`, { key, name: err.name, message: err.message }); isRetryable = true; }
-            else { conciseError = `Attempt ${attempt}: ${String(err)}`; console.error(`[Recall Service MANUAL_GAS] addObjectToBucket Unknown Error (Attempt ${attempt})`, { key, error: err }); isRetryable = true; }
+                 const detailedMessage = err.message?.toLowerCase() || '';
+                 if (detailedMessage.includes('key exists') && detailedMessage.includes('use overwrite')) {
+                     console.error(`[Recall Service OVW] >> KEY EXISTS error (Attempt ${attempt}) for key ${key}. Overwrite flag was ${overwrite}.`);
+                     isRetryable = false; isKeyExistsError = true;
+                 }
+                 else if (detailedMessage.includes('out of gas')) { console.error(`[Recall Service OVW] >> TRANSACTION RAN OUT OF GAS (Attempt ${attempt}) for key ${key}. Increase MANUAL_GAS_LIMIT.`); isRetryable = false; isGasError = true; }
+                 else if (detailedMessage.includes('actor balance') && detailedMessage.includes('less than needed')) { console.error(`[Recall Service OVW] >> Detected insufficient NATIVE GAS balance error (Attempt ${attempt}) for key ${key}`); isRetryable = false; isGasError = true; }
+                 else if (err.name === 'HttpRequestError' || conciseError.includes('RPC Request failed') || conciseError.includes('nonce') || conciseError.includes('timeout')) { isRetryable = true; }
+                console.error(`[Recall Service OVW] addObjectToBucket Viem Error (Attempt ${attempt})`, { key, name: err.name });
+            } else if (err instanceof Error) { conciseError = `Attempt ${attempt}: ${err.message.split('\n')[0]}`; console.error(`[Recall Service OVW] addObjectToBucket Generic Error (Attempt ${attempt})`, { key, name: err.name, message: err.message }); isRetryable = true;}
+            else { conciseError = `Attempt ${attempt}: ${String(err)}`; console.error(`[Recall Service OVW] addObjectToBucket Unknown Error (Attempt ${attempt})`, { key, error: err }); isRetryable = true; }
 
-            if (!isGasPriceError) { console.error(`[Recall Service MANUAL_GAS] addObjectToBucket error (Attempt ${attempt}): ${conciseError}`); }
+            if (!isGasPriceError && !isKeyExistsError) { console.error(`[Recall Service OVW] addObjectToBucket error (Attempt ${attempt}): ${conciseError}`); }
 
             if (isRetryable && attempt < MAX_RPC_RETRIES) {
                 const delay = RETRY_DELAY_MS * Math.pow(2, attempt - 1);
-                console.log(`[Recall Service MANUAL_GAS] Retrying object add for key ${key} in ${delay / 1000}s...`);
+                console.log(`[Recall Service OVW] Retrying object add for key ${key} in ${delay / 1000}s...`);
                 await new Promise(resolve => setTimeout(resolve, delay));
             } else {
-                if (isGasError) conciseError = `Insufficient native gas balance after ${attempt} attempts. Wallet: ${currentAccount.address}`;
-                else if (isGasPriceError) conciseError = `Gas price too high after ${attempt} attempts. Threshold: ${MAX_ACCEPTABLE_PRIORITY_FEE_GWEI} Gwei.`;
-                else conciseError = `Failed adding object after ${attempt} attempts: ${conciseError}`;
-                console.error(`[Recall Service MANUAL_GAS] addObjectToBucket failed permanently for key ${key}. Error: ${conciseError}`);
+                 if(isGasError) conciseError = `Insufficient native gas balance after ${attempt} attempts. Wallet: ${currentAccount.address}`;
+                 else if(isGasPriceError) conciseError = `Gas price too high after ${attempt} attempts. Threshold: ${MAX_ACCEPTABLE_PRIORITY_FEE_GWEI} Gwei.`;
+                 else if(isKeyExistsError) conciseError = `Key exists error despite overwrite=${overwrite} for key ${key}.`;
+                 else conciseError = `Failed adding/overwriting object after ${attempt} attempts: ${conciseError}`;
+                 console.error(`[Recall Service OVW] addObjectToBucket failed permanently for key ${key}. Error: ${conciseError}`);
                 return { success: false, error: conciseError, key: key, gasPriceTooHigh: isGasPriceError };
             }
         }
     }
-    // Fallback return, should ideally not be reached if MAX_RPC_RETRIES > 0
+    // Fallback return
     return { success: false, error: `addObjectToBucket did not execute after ${MAX_RPC_RETRIES} attempts`, key: key };
 }
 
 
 // --- Logging Functions ---
+// Wrapper to handle the gas price error specifically in logging functions
 async function handleLogResult(
     logFunctionName: string,
     context: string,
     result: Awaited<ReturnType<typeof addObjectToBucket>>
 ): Promise<string | undefined> {
-    if (result.success) {
-        console.log(`[Recall Service] ${logFunctionName} successful | Context: ${context.substring(0, 10)}`);
-        return result.key || result.txHash;
-    } else {
-        if (result.gasPriceTooHigh) { console.warn(`[Recall Service] ${logFunctionName} deferred due to high gas price | Context: ${context.substring(0, 10)} | Key: ${result.key}`); }
-        else { console.error(`[Recall Service] ${logFunctionName} failed | Context: ${context.substring(0, 10)} | Error: ${result.error || 'Unknown failure'}`); }
-        return undefined;
-    }
-}
+     if (result.success) {
+         console.log(`[Recall Service] ${logFunctionName} successful | Context: ${context.substring(0,10)}`);
+         return result.key || result.txHash; // Return key or hash
+     } else {
+         if (result.gasPriceTooHigh) {
+             console.warn(`[Recall Service] ${logFunctionName} deferred due to high gas price | Context: ${context.substring(0,10)} | Key: ${result.key}`);
+         } else {
+             console.error(`[Recall Service] ${logFunctionName} failed | Context: ${context.substring(0,10)} | Error: ${result.error || 'Unknown failure'}`);
+         }
+         return undefined; // Indicate failure or deferral
+     }
+ }
 
-export async function logQuestion(question: string, cid: string, requestContext: string): Promise<string | undefined> {
+
+export async function logQuestion( question: string, cid: string, requestContext: string ): Promise<string | undefined> {
     const key = `${QUESTIONS_PREFIX}${requestContext}.json`;
     const data: QuestionData = { question, cid, status: 'PendingAnswer', timestamp: new Date().toISOString(), requestContext };
-    const result = await addObjectToBucket(data, key);
+    const result = await addObjectToBucket(data, key, false); // Don't overwrite questions
     return handleLogResult('logQuestion', requestContext, result);
 }
-export async function logAnswer(answer: string, answeringAgentId: string, requestContext: string): Promise<string | undefined> {
-    const key = `${ANSWERS_PREFIX}${requestContext}/${getAddress(answeringAgentId)}.json`;
-    const data: AnswerData = { answer, answeringAgentId, status: 'Submitted', timestamp: new Date().toISOString(), requestContext };
-    const result = await addObjectToBucket(data, key);
-    return handleLogResult('logAnswer', requestContext, result);
-}
-export async function logVerdict(verdict: 'Correct' | 'Incorrect' | 'Uncertain', confidence: number, verifyingAgentId: string, requestContext: string): Promise<string | undefined> {
-    const key = `${VERDICTS_PREFIX}${requestContext}/${getAddress(verifyingAgentId)}.json`;
+export async function logAnswer( answer: string, answeringAgentId: string, requestContext: string ): Promise<string | undefined> {
+     // Log to unique key per agent for consensus model
+     const key = `${ANSWERS_PREFIX}${requestContext}/${getAddress(answeringAgentId)}.json`; // Use checksummed address
+     const data: AnswerData = { answer, answeringAgentId, status: 'Submitted', timestamp: new Date().toISOString(), requestContext }; // Use 'Submitted' status for individual answer
+     // Allow overwrite for idempotency by same agent
+     const result = await addObjectToBucket(data, key, true);
+     return handleLogResult('logAnswer', requestContext, result);
+ }
+export async function logVerdict( verdict: 'Correct' | 'Incorrect' | 'Uncertain', confidence: number, verifyingAgentId: string, requestContext: string ): Promise<string | undefined> {
+    // Log to unique key per verifier
+    const key = `${VERDICTS_PREFIX}${requestContext}/${getAddress(verifyingAgentId)}.json`; // Use checksummed address
     const data: VerdictData = { verdict, confidence, verifyingAgentId, timestamp: new Date().toISOString(), requestContext };
-    const result = await addObjectToBucket(data, key);
+    // Allow overwrite if verifier runs again
+    const result = await addObjectToBucket(data, key, true);
     return handleLogResult('logVerdict', requestContext, result);
 }
-export async function logErrorEvent(details: Record<string, any>, requestContext: string): Promise<string | undefined> {
-    const timestampSuffix = new Date().toISOString().replace(/[:.]/g, '-').replace('T', '_').replace('Z', '');
-    const key = `${ERRORS_PREFIX}${requestContext}/${details.stage || 'Unknown'}_${timestampSuffix}.json`;
-    const logEntry = { timestamp: new Date().toISOString(), type: 'ERROR_EVENT', details, requestContext };
-    console.log(`[Recall Service] Logging Error Event | Context: ${requestContext.substring(0, 10)} | Stage: ${details.stage || 'Unknown'}`);
-    const result = await addObjectToBucket(logEntry, key);
-    if (!result.success) { console.error(`[Recall Service] >> FAILED TO LOG ERROR EVENT << | Context: ${requestContext.substring(0, 10)} | Stage: ${details.stage || 'Unknown'} | Reason: ${result.error}`); }
-    return result.success ? (result.txHash || 'logged_no_tx_hash') : undefined;
+export async function logErrorEvent( details: Record<string, any>, requestContext: string ): Promise<string | undefined> {
+     const timestampSuffix = new Date().toISOString().replace(/[:.]/g, '-').replace('T', '_').replace('Z', '');
+     const key = `${ERRORS_PREFIX}${requestContext}/${details.stage || 'Unknown'}_${timestampSuffix}.json`;
+     const logEntry = { timestamp: new Date().toISOString(), type: 'ERROR_EVENT', details, requestContext }; // Type ideally RecallEventType
+     console.log(`[Recall Service] Logging Error Event | Context: ${requestContext.substring(0,10)} | Stage: ${details.stage || 'Unknown'}`);
+     // Don't overwrite error logs
+     const result = await addObjectToBucket(logEntry, key, false);
+      if (!result.success) { console.error(`[Recall Service] >> FAILED TO LOG ERROR EVENT << | Context: ${requestContext.substring(0,10)} | Stage: ${details.stage || 'Unknown'} | Reason: ${result.error}`); }
+     return result.success ? (result.txHash || 'logged_no_tx_hash') : undefined;
 }
+// Exported function specifically for overwriting status logs
+export async function logOverwrite( dataObject: object, key: string, logPrefix: string = "logOverwrite" ): Promise<string | undefined> {
+    const context = key.split('/')[1] || 'unknownContext';
+    console.log(`[Recall Service] Overwriting object | Prefix: ${logPrefix} | Key: ${key}`);
+    const result = await addObjectToBucket(dataObject, key, true); // *** Set overwrite to true ***
+    // Use handleLogResult for consistent output handling
+    return handleLogResult(logPrefix, context, result);
+}
+
 
 // --- Function for Fetching Status ---
 export async function getRequestStatus(requestContext: string): Promise<RequestStatus | null> {
@@ -345,35 +388,32 @@ export async function getRequestStatus(requestContext: string): Promise<RequestS
     try {
         const [questionData, hasAnswers, hasVerdicts, evaluationData, payoutData] = await Promise.all([
             fetchObject<QuestionData>(questionKey), checkPrefixExists(answerPrefix), checkPrefixExists(verdictPrefix),
-            fetchObject<EvaluationResult>(evaluationKey), fetchObject<any>(payoutKey)
+            fetchObject<EvaluationResult>(evaluationKey), fetchObject<PayoutStatusData>(payoutKey)
         ]);
 
         if (!questionData) { return null; }
 
-        let overallStatus: JobStatus = 'PendingAnswer'; // Default JobStatus type
-        if (payoutData) { overallStatus = 'Completed'; }
+        let overallStatus: JobStatus = 'PendingAnswer';
+        if (payoutData) { overallStatus = payoutData.success ? 'PayoutComplete' : 'Error'; }
         else if (evaluationData) {
-            // Ensure the status from evaluationData is assignable to JobStatus
+            // Explicitly check against allowed EvaluationResult statuses before assigning to JobStatus
             const evalStatus = evaluationData.status;
             if (evalStatus === 'PendingPayout' || evalStatus === 'PayoutComplete' || evalStatus === 'Error' || evalStatus === 'NoValidAnswers') {
-                overallStatus = evalStatus;
+                 overallStatus = evalStatus;
             } else {
-                overallStatus = 'Error'; // Fallback if status is unexpected
-                console.warn(`[Recall Service] Unexpected status found in evaluation data: ${evalStatus}`);
+                 overallStatus = 'Error'; // Fallback if unexpected status
+                 console.warn(`[Recall Service] Unexpected status in evaluation data for ${requestContext}: ${evalStatus}`);
             }
         }
-        else if (hasAnswers) { overallStatus = 'PendingEvaluation'; } // Correct type
-        // else: Keep default PendingAnswer
+        else if (hasAnswers) { overallStatus = 'PendingEvaluation'; }
+        else { overallStatus = questionData.status || 'PendingAnswer'; }
 
-        // Construct RequestStatus, ensuring evaluationStatus type matches
         const statusResult: RequestStatus = {
             requestContext: requestContext, status: overallStatus,
             question: questionData.question, cid: questionData.cid, submittedAt: questionData.timestamp,
-            hasAnswers: hasAnswers,
-            evaluationStatus: evaluationData?.status, // This now aligns with allowed statuses
-            payoutStatus: payoutData?.success, // Assuming payoutData has a success field
-            payoutMessage: payoutData?.message,
-            error: overallStatus === 'Error' ? (evaluationData?.status === 'Error' ? 'Evaluation Error' : 'Processing error occurred') : undefined,
+            hasAnswers: hasAnswers, evaluationStatus: evaluationData?.status,
+            payoutStatus: payoutData?.success, payoutMessage: payoutData?.message,
+            error: overallStatus === 'Error' ? (payoutData?.message || (evaluationData?.status === 'Error' ? 'Evaluation Error' : 'Processing error occurred')) : undefined,
         };
         return statusResult;
     } catch (error: any) {
@@ -384,21 +424,22 @@ export async function getRequestStatus(requestContext: string): Promise<RequestS
 
 
 // --- Polling Function ---
+// Export getPendingJobs for agent use
 export async function getPendingJobs(prefix: string): Promise<{ key: string; data?: any }[]> {
-    let recall: any; let bucketAddr: Address;
-    try { recall = await getRecallClient(); bucketAddr = await findLogBucketAddressOrFail(recall); }
-    catch (initError: any) { console.error(`[Recall Service] getPendingJobs init error for prefix ${prefix}:`, initError.message); return []; }
-    try {
-        const bucketManager = recall.bucketManager();
-        const { result } = await bucketManager.query(bucketAddr, { prefix, delimiter: '' });
-        const objectInfos = (result?.objects ?? []);
-        if (!objectInfos.length) { return []; }
-        const potentialJobs = objectInfos
-            .map((o: any) => o.key)
-            .filter((k: string | undefined): k is string => typeof k === 'string' && k.endsWith('.json')); // Add type annotation for k
-        return potentialJobs.map((key: string) => ({ key }));
-    } catch (error: any) { console.error(`[Recall Service] Error polling jobs with prefix ${prefix}:`, error.message); return []; }
-}
+     let recall: any; let bucketAddr: Address;
+     try { recall = await getRecallClient(); bucketAddr = await findLogBucketAddressOrFail(recall); }
+     catch (initError: any) { console.error(`[Recall Service] getPendingJobs init error for prefix ${prefix}:`, initError.message); return []; }
+     try {
+         const bucketManager = recall.bucketManager();
+         const { result } = await bucketManager.query(bucketAddr, { prefix, delimiter: '' });
+         const objectInfos = (result?.objects ?? []);
+         if (!objectInfos.length) { return []; }
+         const potentialJobs = objectInfos
+             .map((o: any) => o.key)
+             .filter((k: string | undefined): k is string => typeof k === 'string' && k.endsWith('.json'));
+         return potentialJobs.map((key: string) => ({ key }));
+     } catch (error: any) { console.error(`[Recall Service] Error polling jobs with prefix ${prefix}:`, error.message); return []; }
+ }
 
 
 // --- Helper to fetch object data ---
@@ -414,6 +455,7 @@ export async function getObjectData<T>(key: string): Promise<T | null> {
 
 
 // --- Function to Delete Object ---
+// Export deleteObject for agent use
 export async function deleteObject(key: string): Promise<boolean> {
     let recall: any; let bucketAddr: Address;
     try {
@@ -424,20 +466,19 @@ export async function deleteObject(key: string): Promise<boolean> {
 }
 
 // --- Export logFinalVerificationTrace ---
-export async function logFinalVerificationTrace(requestContext: string, verificationResult: VerificationResultInternal): Promise<string | undefined> {
-    console.warn("[Recall Service] logFinalVerificationTrace called - logging result of sync flow.");
-    const logType: RecallEventType = verificationResult.finalVerdict.startsWith('Error:') ? 'VERIFICATION_ERROR' : 'VERIFICATION_COMPLETE';
-    const finalLogObject: Partial<VerificationResultInternal> & { type: RecallEventType, timestamp: string, requestContext: string } = {
+export async function logFinalVerificationTrace( requestContext: string, verificationResult: VerificationResultInternal ): Promise<string | undefined> {
+     console.warn("[Recall Service] logFinalVerificationTrace called - logging result of sync flow.");
+     const logType: RecallEventType = verificationResult.finalVerdict.startsWith('Error:') ? 'VERIFICATION_ERROR' : 'VERIFICATION_COMPLETE';
+     const finalLogObject: Partial<VerificationResultInternal> & { type: RecallEventType, timestamp: string, requestContext: string } = {
         timestamp: new Date().toISOString(), type: logType, requestContext,
-        finalVerdict: verificationResult.finalVerdict,
-        confidenceScore: verificationResult.confidenceScore, // Correct property name
+        finalVerdict: verificationResult.finalVerdict, confidenceScore: verificationResult.confidenceScore,
         usedFragmentCids: verificationResult.usedFragmentCids, timelockRequestId: verificationResult.timelockRequestId,
         timelockCommitTxHash: verificationResult.timelockCommitTxHash, ciphertextHash: verificationResult.ciphertextHash,
-    };
-    const timeSfx = finalLogObject.timestamp.replace(/[:.]/g, '-').replace('T', '_').replace('Z', '');
-    const key = `${FINAL_RESULTS_PREFIX}${requestContext}/trace_${timeSfx}.json`;
-    const result = await addObjectToBucket(finalLogObject, key);
-    return handleLogResult('logFinalVerificationTrace', requestContext, result);
-}
+     };
+     const timeSfx = finalLogObject.timestamp.replace(/[:.]/g, '-').replace('T', '_').replace('Z', '');
+     const key = `${FINAL_RESULTS_PREFIX}${requestContext}/trace_${timeSfx}.json`;
+     const result = await addObjectToBucket(finalLogObject, key, false); // Don't overwrite trace logs
+     return handleLogResult('logFinalVerificationTrace', requestContext, result);
+ }
 
-// ==== ./services/recallService.ts (LEAN Version + Gas Check + Manual Gas Limit - Fixed Exports/Types/Imports) ====
+// ==== ./services/recallService.ts (LEAN Version + Gas Check + Manual Gas Limit + Overwrite Fixed) ====
