@@ -1,232 +1,214 @@
-// services/fvmContractService.ts
-import { ethers, Wallet, Contract, providers, BigNumber } from 'ethers'; // Use v5 imports
+// src/services/fvmContractService.ts
+import { ethers, Wallet, Contract, providers, BigNumber } from 'ethers';
 import config from '../config';
-import AggregatorAbi from '../contracts/abi/Aggregator.json'; // ABI for the Aggregator
-import { FVM_AGGREGATOR_CONTRACT_ADDRESS } from '../contracts/addresses';
+// @ts-ignore ABI type safety is less critical here, focus on functionality
+import AggregatorAbi from '../contracts/abi/Aggregator.json';
 
 // --- Module State ---
 let provider: providers.StaticJsonRpcProvider | null = null;
 let wallet: Wallet | null = null;
-let aggregatorContract: Contract | null = null;
+let aggregatorContract: Contract | null = null; // Keep for interaction functions
 let isFvmServiceInitialized = false;
+let successfulRpcUrl: string | null = null;
+// --- Promise to track initialization ---
+let initializationPromise: Promise<boolean> | null = null;
 
-// Function to initialize FVM service components
-function initializeFvmService(): boolean {
+/**
+ * Attempts to create a provider using a list of RPC URLs.
+ * Returns the first successful provider and the URL used.
+ */
+async function attemptProviders(rpcUrls: string[]): Promise<{ provider: providers.StaticJsonRpcProvider, url: string } | null> {
+    for (const url of rpcUrls) {
+        if (!url) continue;
+        console.log(`[FVM Contract Service] Attempting connection via RPC: ${url}`);
+        try {
+            const tempProvider = new providers.StaticJsonRpcProvider(url);
+            // Perform a quick network check to ensure connectivity
+            await tempProvider.getNetwork();
+            console.log(`[FVM Contract Service] Successfully connected to RPC: ${url}`);
+            return { provider: tempProvider, url: url };
+        } catch (error: any) {
+            console.warn(`[FVM Contract Service] Failed to connect via RPC ${url}: ${error.message}`);
+        }
+    }
+    console.error("[FVM Contract Service] Exhausted all RPC URLs. Could not establish provider connection.");
+    return null;
+}
+
+
+// --- Initialize FVM Service with RPC Fallback & Direct Call Test ---
+async function initializeFvmServiceInternal(): Promise<boolean> {
+    // Prevent re-initialization if already done or in progress
     if (isFvmServiceInitialized) return true;
-    console.log("[FVM Contract Service] Initializing...");
+    console.log("[FVM Contract Service] Attempting initialization...");
+
+    // Get config within the async function scope
+    const rpcUrls = config.fvmRpcFallbackUrls;
+    const privateKey = config.recallPrivateKey;
+    const contractAddress = config.fvmAggregatorContractAddress;
+    // @ts-ignore ABI type safety
+    const contractAbi = AggregatorAbi.abi;
 
     try {
-        // Validate required config
-        if (!config.fvmRpcUrl || !config.recallPrivateKey || !FVM_AGGREGATOR_CONTRACT_ADDRESS) {
-             console.error("[FVM Contract Service] Missing required config: FVM_RPC_URL, RECALL_PRIVATE_KEY, or FVM_AGGREGATOR_CONTRACT_ADDRESS.");
-             return false;
+        // Basic config validation
+        if (!rpcUrls || rpcUrls.length === 0 || !privateKey || !contractAddress) {
+            throw new Error("Missing required FVM config (RPC URLs, RECALL_PRIVATE_KEY, or FVM_AGGREGATOR_CONTRACT_ADDRESS).");
         }
-        // @ts-ignore - ABI structure check
-        if (!AggregatorAbi.abi || AggregatorAbi.abi.length === 0) {
-             console.error("[FVM Contract Service] FATAL ERROR: Aggregator ABI is missing or empty.");
-             return false;
+        if (!contractAbi || contractAbi.length === 0) {
+            throw new Error("Aggregator ABI missing or empty.");
         }
 
-        // Setup provider and wallet (using recallPrivateKey for FVM interactions)
-        provider = new providers.StaticJsonRpcProvider(config.fvmRpcUrl);
-        const fvmWalletPrivateKey = config.recallPrivateKey; // Reuse recall key
-        wallet = new Wallet(fvmWalletPrivateKey, provider);
-        console.log(`[FVM Contract Service] Using Wallet: ${wallet.address} on RPC: ${config.fvmRpcUrl}`);
+        // Attempt to connect to a working RPC provider
+        const providerResult = await attemptProviders(rpcUrls);
+        if (!providerResult) {
+             throw new Error("Failed provider connection to any configured RPC URL.");
+        }
 
-        // Create contract instance
-        // @ts-ignore - ABI type
-        aggregatorContract = new Contract(FVM_AGGREGATOR_CONTRACT_ADDRESS, AggregatorAbi.abi, wallet);
-        console.log(`[FVM Contract Service] Aggregator contract instance created at: ${aggregatorContract.address}`);
+        provider = providerResult.provider; // Assign the working provider
+        successfulRpcUrl = providerResult.url;
+        wallet = new Wallet(privateKey, provider); // Create wallet with working provider
+        console.log(`[FVM Contract Service] Using Wallet: ${wallet.address} via RPC: ${successfulRpcUrl}`);
 
-        // Perform a quick check (e.g., get owner) to ensure connection
-        aggregatorContract.owner().then((owner: string) => {
-            console.log(`[FVM Contract Service] Successfully connected to Aggregator contract. Owner: ${owner}`);
-            isFvmServiceInitialized = true;
-            console.log("[FVM Contract Service] Initialization complete.");
-        }).catch((err: any) => {
-            console.error("[FVM Contract Service] Failed to connect to Aggregator contract:", err.message || err);
-            isFvmServiceInitialized = false;
-        });
+        // --- Direct eth_call for owner() as primary check ---
+        const ownerFunctionSignature = "0x8da5cb5b"; // Signature hash for owner()
+        console.log(`[FVM Contract Service] Performing direct eth_call check for owner() at ${contractAddress} via ${successfulRpcUrl}...`);
+        try {
+            const callResult = await provider.call({
+                to: contractAddress,
+                data: ownerFunctionSignature
+            });
+            console.log(`[FVM Contract Service] Direct eth_call result: ${callResult}`);
 
-        return true; // Initialization sequence started
+            if (callResult && callResult !== "0x" && callResult !== "0x0") {
+                 // Decode the result (ethers pads addresses)
+                 const decodedOwner = ethers.utils.defaultAbiCoder.decode(['address'], callResult)[0];
+                 console.log(`✅ Direct eth_call successful. Decoded Owner: ${decodedOwner}`);
 
-    } catch (error: any) {
-         console.error("[FVM Contract Service] FATAL Initialization failed:", error.message);
+                 // Now that direct call worked, create the contract instance for interactions
+                 // @ts-ignore ABI type safety
+                 aggregatorContract = new Contract(contractAddress, contractAbi, wallet);
+                 console.log(`[FVM Contract Service] Contract instance created at: ${aggregatorContract.address}`);
+
+                 isFvmServiceInitialized = true; // Set flag AFTER successful check
+                 console.log("[FVM Contract Service] Initialization complete.");
+                 return true; // SUCCESS
+
+            } else {
+                 console.error(`[FVM Contract Service] Direct eth_call returned empty or zero data: ${callResult}. Contract state might be invalid or inaccessible.`);
+                  throw new Error(`Direct eth_call for owner() returned invalid data: ${callResult}`); // Force failure
+            }
+        } catch (ethCallError: any) {
+             console.error(`[FVM Contract Service] Direct eth_call FAILED: ${ethCallError.message || ethCallError}`);
+             // Log nested RPC error if available
+             if(ethCallError.error?.body || ethCallError.error?.message){
+                 const errorBody = JSON.stringify(ethCallError.error.body || ethCallError.error.message);
+                 console.error("   RPC Error Details:", errorBody);
+                 if (errorBody.includes('actor not found')){
+                     console.error("   >> Hint: RPC node reports 'actor not found'. Verify address and network deployment.");
+                 }
+             }
+             throw ethCallError; // Re-throw to be caught by outer catch
+        }
+
+    } catch (error: any) { // Catch errors from config check, provider connection, or eth_call
+         console.error(`[FVM Contract Service] Initialization failed: ${error.message || error}`);
+         // Reset state variables on any initialization failure
          isFvmServiceInitialized = false;
-         return false;
+         provider = null;
+         wallet = null;
+         aggregatorContract = null;
+         successfulRpcUrl = null;
+         initializationPromise = null; // Allow retrying initialization later if needed
+         return false; // Indicate initialization failure
     }
 }
 
-// Attempt initialization on module load
-initializeFvmService();
+/**
+ * Ensures the service is initialized and returns the contract instance.
+ * Throws an error if initialization failed or is in progress unsuccessfully.
+ */
+async function getContractInstance(): Promise<Contract> {
+    // Start initialization if it hasn't begun or if it previously failed
+    if (!initializationPromise) {
+        initializationPromise = initializeFvmServiceInternal();
+    }
+
+    const success = await initializationPromise; // Wait for initialization to finish
+
+    // Check if initialization was successful and contract instance exists
+    if (!success || !aggregatorContract) {
+        console.error("[FVM Contract Service] getContractInstance called but service is not initialized or failed initialization.");
+        // Reset promise to allow re-initialization attempt on next call
+        initializationPromise = null;
+        throw new Error("FVM Contract Service failed to initialize or contract instance is unavailable.");
+    }
+    // If successful, return the instance
+    return aggregatorContract;
+}
 
 
 // --- Contract Interaction Functions ---
+// Modified to await getContractInstance() before interacting
 
-/**
- * Submits a verification result from a verification agent to the Aggregator contract.
- * @param requestContext The unique identifier for the request being verified.
- * @param agentId The identifier of the verification agent.
- * @param verdict The verdict string (e.g., "Correct", "Incorrect").
- * @param confidence A number from 0.0 to 1.0 (will be scaled to uint8 0-255).
- * @param evidenceCid The CID of the evidence supporting the verdict (can be the original KB CID).
- * @returns The transaction hash if successful, otherwise null.
- */
 export async function submitVerificationResult(
-    requestContext: string,
-    agentId: string,
-    verdict: string,
-    confidence: number,
-    evidenceCid: string
+    requestContext: string, agentId: string, verdict: string, confidence: number, evidenceCid: string
 ): Promise<string | null> {
-    if (!isFvmServiceInitialized || !aggregatorContract || !wallet) {
-        console.error('[FVM Contract Service] Service not initialized. Cannot submit verification.');
-        return null;
-    }
-    // Validate confidence range and convert to uint8 (0-255)
-    const confidenceUint8 = Math.max(0, Math.min(255, Math.round(confidence * 255)));
-    console.log(`[FVM Contract Service] Submitting verification | Context: ${requestContext.substring(0,10)}, Agent: ${agentId}, Verdict: ${verdict}, Confidence: ${confidenceUint8}/255, Evidence: ${evidenceCid.substring(0,10)}...`);
-
     try {
-        // Optional Gas Estimation
-        let estimatedGas: BigNumber | undefined;
-        try {
-            estimatedGas = await aggregatorContract.estimateGas.submitVerificationResult(
-                requestContext,
-                agentId,
-                verdict,
-                confidenceUint8,
-                evidenceCid
-            );
-            console.log(`[FVM Contract Service DEBUG] Estimated Gas for submitVerificationResult: ${estimatedGas.toString()}`);
-        } catch (simError: any) {
-             // Extract reason - ethers v5 style might need refinement based on actual FVM error structure
-             let reason = simError.reason || simError.error?.data?.message || simError.data?.message || simError.message;
-             console.error(`[FVM Contract Service DEBUG] Gas estimation/simulation FAILED for submitVerificationResult: ${reason}`);
-             // Decide whether to throw or proceed without estimate based on error type
-             // If it's a revert, we should probably throw.
-             if (reason?.toLowerCase().includes('revert')) {
-                throw new Error(`Transaction simulation reverted: ${reason}`);
-             }
-             // Otherwise, maybe proceed without estimate but log warning
-             console.warn(`[FVM Contract Service] Proceeding without gas estimate due to simulation error.`);
-             estimatedGas = undefined; // Ensure it's undefined if estimation failed non-critically
-        }
+        const contract = await getContractInstance(); // Wait for/get initialized instance
+        // Scale confidence if input is 0-100, otherwise assume 0-1 and scale up
+        const confidenceUint8 = (confidence >= 0 && confidence <= 1)
+            ? Math.max(0, Math.min(255, Math.round(confidence * 255)))
+            : Math.max(0, Math.min(255, Math.round(confidence))); // Assume 0-255 if > 1
 
-        const txOptions = { gasLimit: estimatedGas ? estimatedGas.mul(120).div(100) : undefined }; // Add 20% buffer if estimate exists
-
-        const txResponse: providers.TransactionResponse = await aggregatorContract.submitVerificationResult(
-            requestContext,
-            agentId,
-            verdict,
-            confidenceUint8,
-            evidenceCid,
-            txOptions
+        console.log(`[FVM Contract Service] Submitting verification: Context=${requestContext.substring(0,6)} Agent=${agentId.substring(0,10)} Verdict=${verdict} Conf=${confidenceUint8}/255`);
+        const txOptions = { gasLimit: 3_000_000 }; // Example manual limit, TUNE!
+        const txResponse: providers.TransactionResponse = await contract.submitVerificationResult(
+            requestContext, agentId, verdict, confidenceUint8, evidenceCid, txOptions
         );
-
-        console.log(`[FVM Contract Service] submitVerificationResult transaction sent. Hash: ${txResponse.hash}`);
-        // Don't wait for confirmation by default in service layer for responsiveness
-        // Agents might handle waiting/retries if needed
+        console.log(`[FVM Contract Service] submitVerificationResult tx sent: ${txResponse.hash}`);
         return txResponse.hash;
-
     } catch (error: any) {
+        // Log error including context for better debugging
         console.error(`[FVM Contract Service] Error submitting verification for context ${requestContext}:`, error.message || error);
         return null;
     }
 }
 
-/**
- * Triggers the aggregation process on the Aggregator contract for a specific request context.
- * This would typically be called after enough verification verdicts have been submitted.
- * @param requestContext The unique identifier for the request to aggregate.
- * @returns The transaction hash if successful, otherwise null.
- */
-export async function triggerAggregation(
-    requestContext: string
-): Promise<string | null> {
-     if (!isFvmServiceInitialized || !aggregatorContract || !wallet) {
-        console.error('[FVM Contract Service] Service not initialized. Cannot trigger aggregation.');
-        return null;
-    }
-    console.log(`[FVM Contract Service] Triggering aggregation for context: ${requestContext.substring(0,10)}...`);
-
-    try {
-        // Optional Gas Estimation
-        let estimatedGas: BigNumber | undefined;
-        try {
-            estimatedGas = await aggregatorContract.estimateGas.aggregateResults(requestContext);
-             console.log(`[FVM Contract Service DEBUG] Estimated Gas for aggregateResults: ${estimatedGas.toString()}`);
-        } catch (simError: any) {
-             let reason = simError.reason || simError.error?.data?.message || simError.data?.message || simError.message;
-             console.error(`[FVM Contract Service DEBUG] Gas estimation/simulation FAILED for aggregateResults: ${reason}`);
-             if (reason?.toLowerCase().includes('revert')) {
-                throw new Error(`Transaction simulation reverted: ${reason}`);
-             }
-             console.warn(`[FVM Contract Service] Proceeding without gas estimate due to simulation error.`);
-             estimatedGas = undefined;
-        }
-
-        const txOptions = { gasLimit: estimatedGas ? estimatedGas.mul(120).div(100) : undefined };
-
-        const txResponse: providers.TransactionResponse = await aggregatorContract.aggregateResults(
-            requestContext,
-            txOptions
-        );
-
-        console.log(`[FVM Contract Service] aggregateResults transaction sent. Hash: ${txResponse.hash}`);
+export async function triggerAggregation(requestContext: string): Promise<string | null> {
+     try {
+        const contract = await getContractInstance(); // Wait for/get initialized instance
+        console.log(`[FVM Contract Service] Triggering aggregation for context: ${requestContext.substring(0,10)}...`);
+        const txOptions = { gasLimit: 5_000_000 }; // Aggregation might be expensive, TUNE!
+        const txResponse: providers.TransactionResponse = await contract.aggregateResults(requestContext, txOptions);
+        console.log(`[FVM Contract Service] aggregateResults tx sent: ${txResponse.hash}`);
         return txResponse.hash;
-
     } catch (error: any) {
         console.error(`[FVM Contract Service] Error triggering aggregation for context ${requestContext}:`, error.message || error);
         return null;
     }
 }
 
-/**
- * Registers an agent ID with a payout address. Needed before an agent can submit results.
- * @param agentId The unique identifier for the agent.
- * @param payoutAddress The ETH address for receiving rewards.
- * @returns The transaction hash if successful, otherwise null.
- */
-export async function registerAgent(
-    agentId: string,
-    payoutAddress: string
-): Promise<string | null> {
-     if (!isFvmServiceInitialized || !aggregatorContract || !wallet) {
-        console.error('[FVM Contract Service] Service not initialized. Cannot register agent.');
-        return null;
-    }
-     if (!ethers.utils.isAddress(payoutAddress)) {
-         console.error(`[FVM Contract Service] Invalid payout address provided for agent ${agentId}: ${payoutAddress}`);
-         return null;
-     }
-     console.log(`[FVM Contract Service] Registering agent | ID: ${agentId}, Payout Address: ${payoutAddress}`);
-
+export async function registerAgent(agentId: string, payoutAddress: string): Promise<string | null> {
      try {
-         // Add gas estimation if desired
-         const txResponse: providers.TransactionResponse = await aggregatorContract.registerAgent(
-             agentId,
-             payoutAddress
-         );
-         console.log(`[FVM Contract Service] registerAgent transaction sent. Hash: ${txResponse.hash}`);
-         return txResponse.hash;
+        const contract = await getContractInstance(); // Wait for/get initialized instance
+        if (!ethers.utils.isAddress(payoutAddress)) {
+            console.error(`[FVM Service] Invalid payout address provided for agent ${agentId}: ${payoutAddress}`);
+            return null;
+        }
+        console.log(`[FVM Contract Service] Registering agent: ID=${agentId}, Payout=${payoutAddress}`);
+         // Add gas limit if necessary, consult contract gas usage
+        const txOptions = { gasLimit: 1_000_000 }; // Example limit
+        const txResponse: providers.TransactionResponse = await contract.registerAgent(agentId, payoutAddress, txOptions);
+        console.log(`[FVM Contract Service] registerAgent tx sent: ${txResponse.hash}`);
+        return txResponse.hash;
      } catch (error: any) {
-         const message = error.message || error;
-         console.error(`[FVM Contract Service] Error registering agent ${agentId}:`, message);
-         // Check for common errors like 'Agent already registered' if the contract reverts with specific reasons
-         if (message.includes('Agent already registered')) { // Example check
-             console.warn(`[FVM Contract Service] Agent ${agentId} might already be registered.`);
-         }
+         console.error(`[FVM Contract Service] Error registering agent ${agentId}:`, error.message || error);
          return null;
      }
 }
 
-// Add other Aggregator contract interactions as needed:
-// - registerEvidence(cid, submitter, dealId)
-// - getAgentAddress(agentId) -> returns address
-// - getSubmissions(requestContext) -> returns VerifierSubmission[]
-// - getAggregatedVerdict(requestContext) -> returns AggregatedVerdict
-// - getEvidenceInfo(cid) -> returns EvidenceInfo
-// - depositFunds() (payable)
-// - withdrawFunds(amount)
-// ==== ./services/fvmContractService.ts ====
+// Call initialization when the module loads, store the promise
+// Subsequent calls to exported functions will await this promise via getContractInstance.
+initializationPromise = initializeFvmServiceInternal();
+
+// ==== ./src/services/fvmContractService.ts ====

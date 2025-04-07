@@ -8,17 +8,17 @@ import {
     LLMVerificationResult as LLMVerificationResultType,
     LLMEvaluationResult as LLMEvaluationResultType
 } from '../types';
-export { LLMVerificationResultType as LLMVerificationResult }; // Re-export with original name for verifierService
-export { LLMEvaluationResultType as LLMEvaluationResult }; // Re-export evaluation type for evaluationPayoutService
+export { LLMVerificationResultType as LLMVerificationResult }; // Re-export verification type
+export { LLMEvaluationResultType as LLMEvaluationResult }; // Re-export evaluation type
 
 const OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions";
-const API_KEY = config.openRouterApiKey; // Ensure API key is loaded from config
-const MODEL_IDENTIFIER = "mistralai/mistral-7b-instruct:free"; // Or choose another suitable model
+const API_KEY = config.openRouterApiKey;
+const MODEL_IDENTIFIER = "mistralai/mistral-7b-instruct:free";
 
 // Rate Limiting Configuration
-const RATE_LIMIT_WINDOW_MS = 60 * 1000; // 60 seconds window
-const MAX_REQUESTS_PER_WINDOW = 10; // Allow 10 requests per minute (adjust as needed)
-const RATE_LIMIT_RETRY_DELAY_MS = 15000; // Wait 15 seconds if limit is hit
+const RATE_LIMIT_WINDOW_MS = 60 * 1000;
+const MAX_REQUESTS_PER_WINDOW = 10;
+const RATE_LIMIT_RETRY_DELAY_MS = 15000;
 let requestTimestamps: number[] = [];
 
 // --- Constants for different LLM tasks ---
@@ -28,8 +28,8 @@ const MAX_TOKENS_CLAIM = 100;
 const TEMPERATURE_CLAIM = 0.4;
 const MAX_TOKENS_VERIFY = 50;
 const TEMPERATURE_VERIFY = 0.2;
-const MAX_TOKENS_EVALUATE = 50;
-const TEMPERATURE_EVALUATE = 0.2;
+const MAX_TOKENS_EVALUATE = 60; // Slightly increase tokens for evaluation response
+const TEMPERATURE_EVALUATE = 0.1; // Lower temp for more deterministic evaluation output
 
 let isGeneratorInitialized = false;
 
@@ -89,7 +89,7 @@ Do not add any explanation or commentary beyond the direct answer.`;
 
     const truncatedContent = truncateText(paperContent, 4000);
     const userPrompt = `TEXT EXCERPT:\n---\n${truncatedContent}\n---\n\nQUESTION: "${question}"\n\nANSWER:`;
-    const payload = { model: MODEL_IDENTIFIER, messages: [{ role: "system", content: systemPrompt }, { role: "user", content: userPrompt }], max_tokens: MAX_TOKENS_ANSWER, temperature: TEMPERATURE_ANSWER, top_p: 0.9 };
+    const payload = { model: MODEL_IDENTIFIER, messages: [ { role: "system", content: systemPrompt }, { role: "user", content: userPrompt } ], max_tokens: MAX_TOKENS_ANSWER, temperature: TEMPERATURE_ANSWER, top_p: 0.9 };
 
     try {
         const response = await axios.post(OPENROUTER_API_URL, payload, { headers: { 'Authorization': `Bearer ${API_KEY}`, 'Content-Type': 'application/json', 'HTTP-Referer': `http://localhost:${config.port || 3001}`, 'X-Title': 'Kintask AnswerGen', }, timeout: 90000 });
@@ -117,33 +117,33 @@ export async function getVerificationFromLLM( // Exported for potential use
     requestContext?: string,
     agentId?: string
 ): Promise<LLMVerificationResultType> { // Use imported type alias
-    if (!isGeneratorInitialized) { return { verdict: 'Neutral', confidence: 0.1, explanation: "Verifier LLM misconfigured (API Key missing?)." }; }
-    if (!claim || !paperExcerpt) { return { verdict: 'Neutral', confidence: 0.1, explanation: "Missing input for verification." }; }
+     if (!isGeneratorInitialized) { return { verdict: 'Neutral', confidence: 0.1, explanation: "Verifier LLM misconfigured (API Key missing?)." }; }
+     if (!claim || !paperExcerpt) { return { verdict: 'Neutral', confidence: 0.1, explanation: "Missing input for verification." }; }
 
-    const agentType = agentId || "VerificationAgent";
-    await waitForRateLimit(requestContext, agentType);
-    const logPrefix = `[Generator Service - ${agentType} | ${requestContext?.substring(0, 10)}...]`;
-    console.log(`${logPrefix} Requesting LLM verification for claim...`);
+     const agentType = agentId || "VerificationAgent";
+     await waitForRateLimit(requestContext, agentType);
+     const logPrefix = `[Generator Service - ${agentType} | ${requestContext?.substring(0, 10)}...]`;
+     console.log(`${logPrefix} Requesting LLM verification for claim...`);
 
-    const systemPrompt = `You are an AI evaluating claims against a text excerpt. Analyze the TEXT EXCERPT to determine if it supports, contradicts, or is neutral towards the CLAIM. Respond ONLY in the format:\nVerdict: [Supported|Contradicted|Neutral]\nConfidence: [0.0-1.0]\nExplanation: [1 sentence concisely explaining the reasoning based *only* on the text.]`;
-    const truncatedExcerpt = truncateText(paperExcerpt, 3500);
-    const userPrompt = `CLAIM: "${claim}"\n\nTEXT EXCERPT:\n---\n${truncatedExcerpt}\n---\nBased *only* on the TEXT EXCERPT, evaluate the CLAIM.`;
-    const payload = { model: MODEL_IDENTIFIER, messages: [{ role: "system", content: systemPrompt }, { role: "user", content: userPrompt }], max_tokens: MAX_TOKENS_VERIFY, temperature: TEMPERATURE_VERIFY };
+     const systemPrompt = `You are an AI evaluating claims against a text excerpt. Analyze the TEXT EXCERPT to determine if it supports, contradicts, or is neutral towards the CLAIM. Respond ONLY in the format:\nVerdict: [Supported|Contradicted|Neutral]\nConfidence: [0.0-1.0]\nExplanation: [1 sentence concisely explaining the reasoning based *only* on the text.]`;
+     const truncatedExcerpt = truncateText(paperExcerpt, 3500);
+     const userPrompt = `CLAIM: "${claim}"\n\nTEXT EXCERPT:\n---\n${truncatedExcerpt}\n---\nBased *only* on the TEXT EXCERPT, evaluate the CLAIM.`;
+     const payload = { model: MODEL_IDENTIFIER, messages: [ { role: "system", content: systemPrompt }, { role: "user", content: userPrompt } ], max_tokens: MAX_TOKENS_VERIFY, temperature: TEMPERATURE_VERIFY };
 
-    try {
-        const response = await axios.post(OPENROUTER_API_URL, payload, { headers: { 'Authorization': `Bearer ${API_KEY}`, 'Content-Type': 'application/json', 'HTTP-Referer': `http://localhost:${config.port || 3001}`, 'X-Title': 'Kintask VerifierLLM', }, timeout: 60000 });
-        console.log(`${logPrefix} Verify LLM API Call Successful | Status: ${response.status}`);
-        const content = response.data?.choices?.[0]?.message?.content?.trim();
-        if (!content) { throw new Error("LLM Verifier returned empty content."); }
-        // --- Parsing Logic ---
-        let verdict: 'Supported' | 'Contradicted' | 'Neutral' = 'Neutral'; let confidence = 0.5; let explanation = "Could not parse LLM response.";
-        const verdictMatch = content.match(/Verdict:\s*(Supported|Contradicted|Neutral)/i); const confidenceMatch = content.match(/Confidence:\s*([0-9.]+)/i); const explanationMatch = content.match(/Explanation:\s*(.*)/i);
-        if (verdictMatch?.[1]) { const fv = verdictMatch[1].charAt(0).toUpperCase() + verdictMatch[1].slice(1).toLowerCase(); if (fv === 'Supported' || fv === 'Contradicted' || fv === 'Neutral') { verdict = fv; } }
-        if (confidenceMatch?.[1]) { const pc = parseFloat(confidenceMatch[1]); if (!isNaN(pc) && pc >= 0 && pc <= 1) { confidence = pc; } else { console.warn(`${logPrefix} Could not parse confidence value: ${confidenceMatch[1]}`); } } else { console.warn(`${logPrefix} Could not find confidence value in response.`); }
-        if (explanationMatch?.[1]) { explanation = explanationMatch[1].trim(); } else { console.warn(`${logPrefix} Could not find explanation in response.`); }
-        console.log(`${logPrefix} Verification Result: ${verdict} (Conf: ${confidence.toFixed(2)})`);
-        return { verdict, confidence: parseFloat(confidence.toFixed(2)), explanation };
-    } catch (error: any) {
+     try {
+         const response = await axios.post(OPENROUTER_API_URL, payload, { headers: { 'Authorization': `Bearer ${API_KEY}`, 'Content-Type': 'application/json', 'HTTP-Referer': `http://localhost:${config.port || 3001}`, 'X-Title': 'Kintask VerifierLLM', }, timeout: 60000 });
+         console.log(`${logPrefix} Verify LLM API Call Successful | Status: ${response.status}`);
+         const content = response.data?.choices?.[0]?.message?.content?.trim();
+         if (!content) { throw new Error("LLM Verifier returned empty content."); }
+         // --- Parsing Logic ---
+         let verdict: 'Supported' | 'Contradicted' | 'Neutral' = 'Neutral'; let confidence = 0.5; let explanation = "Could not parse LLM response.";
+         const verdictMatch = content.match(/Verdict:\s*(Supported|Contradicted|Neutral)/i); const confidenceMatch = content.match(/Confidence:\s*([0-9.]+)/i); const explanationMatch = content.match(/Explanation:\s*(.*)/i);
+         if (verdictMatch?.[1]) { const fv = verdictMatch[1].charAt(0).toUpperCase() + verdictMatch[1].slice(1).toLowerCase(); if (fv === 'Supported' || fv === 'Contradicted' || fv === 'Neutral') { verdict = fv; } }
+         if (confidenceMatch?.[1]) { const pc = parseFloat(confidenceMatch[1]); if (!isNaN(pc) && pc >= 0 && pc <= 1) { confidence = pc; } else { console.warn(`${logPrefix} Could not parse confidence value: ${confidenceMatch[1]}`); } } else { console.warn(`${logPrefix} Could not find confidence value in response.`); }
+         if (explanationMatch?.[1]) { explanation = explanationMatch[1].trim(); } else { console.warn(`${logPrefix} Could not find explanation in response.`); }
+         console.log(`${logPrefix} Verification Result: ${verdict} (Conf: ${confidence.toFixed(2)})`);
+         return { verdict, confidence: parseFloat(confidence.toFixed(2)), explanation };
+     } catch (error: any) {
         const axiosError = error as AxiosError; let detailedErrorMessage = axiosError.message.split('\n')[0]; let statusCode: number | string = axiosError.code || 'N/A';
         console.error(`\n--- ERROR in getVerificationFromLLM (${logPrefix}) ---`);
         if (axiosError.response) { statusCode = axiosError.response.status; console.error(`[...] API Call FAILED | Status: ${statusCode}`); console.error(`[...] Error Response Data:`, JSON.stringify(axiosError.response.data, null, 2)); detailedErrorMessage = (axiosError.response.data as any)?.error?.message || `HTTP Error ${statusCode}`; }
@@ -151,7 +151,7 @@ export async function getVerificationFromLLM( // Exported for potential use
         else { console.error(`[...] Setup Error | Status: ${statusCode} | Msg: ${detailedErrorMessage}`); }
         console.error(`[...] Final Error for LLM call: ${detailedErrorMessage}`); console.error(`--- END ERROR ---`);
         return { verdict: 'Neutral', confidence: 0.1, explanation: `LLM API Error: ${detailedErrorMessage}` };
-    }
+     }
 }
 
 
@@ -164,8 +164,17 @@ export async function evaluateAnswerWithLLM( // Ensure EXPORT keyword is present
     requestContext?: string,
     agentId?: string
 ): Promise<LLMEvaluationResultType> { // Use imported specific return type
-    if (!isGeneratorInitialized) { return { evaluation: 'Uncertain', confidence: 0.1, explanation: "Evaluator LLM misconfigured." }; }
-    if (!question || !answer || !knowledgeBaseExcerpt) { return { evaluation: 'Uncertain', confidence: 0.1, explanation: "Missing input for evaluation." }; }
+    // Function entry log
+    console.log(`DEBUG: evaluateAnswerWithLLM called for context ${requestContext?.substring(0, 10)}`);
+
+    if (!isGeneratorInitialized) {
+        console.error(`[Evaluation Agent ${agentId} Error] Generator Service not initialized.`);
+        return { evaluation: 'Uncertain', confidence: 0.1, explanation: "Evaluator LLM misconfigured." };
+     }
+     if (!question || !answer || !knowledgeBaseExcerpt) {
+         console.error(`[Evaluation Agent ${agentId} Error] Missing question, answer, or excerpt for evaluation.`);
+         return { evaluation: 'Uncertain', confidence: 0.1, explanation: "Missing input for evaluation." };
+     }
 
     const agentType = agentId || "EvaluationAgent";
     await waitForRateLimit(requestContext, agentType);
@@ -178,29 +187,85 @@ Determine if the ANSWER is:
 - Incorrect: Contains information not supported by the TEXT EXCERPT, misinterprets the text, or fails to answer the QUESTION directly.
 - Uncertain: The text doesn't contain enough information to definitively judge the answer's correctness relative to the QUESTION.
 
-Respond ONLY in the format:
+Respond ONLY in the exact format below, with each field on a new line:
 Evaluation: [Correct|Incorrect|Uncertain]
 Confidence: [0.0-1.0]
-Explanation: [1 sentence explaining your evaluation based *only* on the text.]`;
+Explanation: [1 sentence explaining your evaluation based *only* on the text.]`; // Explicit format instruction
 
     const truncatedExcerpt = truncateText(knowledgeBaseExcerpt, 3500);
-    const userPrompt = `TEXT EXCERPT:\n---\n${truncatedExcerpt}\n---\n\nQUESTION: "${question}"\n\nANSWER TO EVALUATE: "${answer}"\n\nEvaluation:`;
-    const payload = { model: MODEL_IDENTIFIER, messages: [{ role: "system", content: systemPrompt }, { role: "user", content: userPrompt }], max_tokens: MAX_TOKENS_EVALUATE, temperature: TEMPERATURE_EVALUATE };
+    const userPrompt = `TEXT EXCERPT:\n---\n${truncatedExcerpt}\n---\n\nQUESTION: "${question}"\n\nANSWER TO EVALUATE: "${answer}"\n\nEvaluation:`; // Added 'Evaluation:' to guide model
+    const payload = { model: MODEL_IDENTIFIER, messages: [ { role: "system", content: systemPrompt }, { role: "user", content: userPrompt } ], max_tokens: MAX_TOKENS_EVALUATE, temperature: TEMPERATURE_EVALUATE };
 
     try {
-        const response = await axios.post(OPENROUTER_API_URL, payload, { headers: { 'Authorization': `Bearer ${API_KEY}`, 'Content-Type': 'application/json', 'HTTP-Referer': `http://localhost:${config.port || 3001}`, 'X-Title': 'Kintask EvaluatorLLM', }, timeout: 60000 });
+        console.log(`${logPrefix} Sending request to OpenRouter...`); // Log before request
+        const response = await axios.post(OPENROUTER_API_URL, payload, { headers: { 'Authorization': `Bearer ${API_KEY}`, 'Content-Type': 'application/json', /* other headers */ }, timeout: 60000 });
         console.log(`${logPrefix} Evaluation LLM Call Successful | Status: ${response.status}`);
-        const content = response.data?.choices?.[0]?.message?.content?.trim();
-        if (!content) { throw new Error("Evaluation LLM returned empty content."); }
-        // --- Parsing Logic ---
-        let evaluation: 'Correct' | 'Incorrect' | 'Uncertain' = 'Uncertain'; let confidence = 0.5; let explanation = "Could not parse evaluation response.";
-        const evalMatch = content.match(/Evaluation:\s*(Correct|Incorrect|Uncertain)/i); const confMatch = content.match(/Confidence:\s*([0-9.]+)/i); const explMatch = content.match(/Explanation:\s*(.*)/i);
-        if (evalMatch?.[1]) { const ev = evalMatch[1].charAt(0).toUpperCase() + evalMatch[1].slice(1).toLowerCase(); if (ev === 'Correct' || ev === 'Incorrect' || ev === 'Uncertain') { evaluation = ev; } }
-        if (confMatch?.[1]) { const pc = parseFloat(confMatch[1]); if (!isNaN(pc) && pc >= 0 && pc <= 1) { confidence = pc; } }
-        if (explMatch?.[1]) { explanation = explMatch[1].trim(); }
-        console.log(`${logPrefix} Evaluation Result: ${evaluation} (Conf: ${confidence.toFixed(2)})`);
+        const rawContent = response.data?.choices?.[0]?.message?.content?.trim(); // Get raw response
+        if (!rawContent) { throw new Error("Evaluation LLM returned empty content."); }
+
+        console.log(`${logPrefix} Raw LLM Evaluation Response:\n---\n${rawContent}\n---`); // *** Log the Raw Response ***
+
+        // --- More Flexible Parsing Logic ---
+        let evaluation: 'Correct' | 'Incorrect' | 'Uncertain' = 'Uncertain'; // Default
+        let confidence = 0.5; // Default
+        let explanation = "Could not parse explanation."; // Default
+
+        // Try matching the specific format first
+        let evalMatch = rawContent.match(/^Evaluation:\s*(Correct|Incorrect|Uncertain)/im);
+        let confMatch = rawContent.match(/^Confidence:\s*([0-9.]+)/im);
+        let explMatch = rawContent.match(/^Explanation:\s*(.*)/im);
+
+        // Attempt to extract evaluation
+        if (evalMatch?.[1]) {
+            const ev = evalMatch[1].charAt(0).toUpperCase() + evalMatch[1].slice(1).toLowerCase();
+            if (ev === 'Correct' || ev === 'Incorrect' || ev === 'Uncertain') { evaluation = ev; }
+            else { console.warn(`${logPrefix} Parsed unexpected evaluation value: ${evalMatch[1]}`); }
+        } else {
+            console.warn(`${logPrefix} Could not find 'Evaluation:' line. Trying to match verdict directly at start...`);
+            // Fallback: Check if the *first word* is Correct/Incorrect/Uncertain
+            const firstWordMatch = rawContent.match(/^(Correct|Incorrect|Uncertain)/i);
+            if (firstWordMatch?.[1]) {
+                const ev = firstWordMatch[1].charAt(0).toUpperCase() + firstWordMatch[1].slice(1).toLowerCase();
+                 if (ev === 'Correct' || ev === 'Incorrect' || ev === 'Uncertain') {
+                     evaluation = ev;
+                     console.log(`${logPrefix} Parsed evaluation from first word: ${evaluation}`); // Log success of fallback
+                 }
+            } else {
+                console.warn(`${logPrefix} Could not determine evaluation from response start either.`);
+            }
+        }
+        // Log final parsed evaluation only once
+        console.log(`${logPrefix} Final Parsed Evaluation: ${evaluation}`);
+
+        // Attempt to extract confidence (keep existing logic)
+        if (confMatch?.[1]) {
+            const pc = parseFloat(confMatch[1]);
+            if (!isNaN(pc) && pc >= 0 && pc <= 1) { confidence = pc; console.log(`${logPrefix} Parsed Confidence: ${confidence}`); }
+            else { console.warn(`${logPrefix} Could not parse confidence value: ${confMatch[1]}`); confidence = 0.5; }
+        } else { console.warn(`${logPrefix} Could not find 'Confidence:' line.`); confidence = 0.5; }
+
+        // Attempt to extract explanation (keep existing logic)
+        if (explMatch?.[1]) {
+             explanation = explMatch[1].trim(); console.log(`${logPrefix} Parsed Explanation: ${explanation}`);
+        } else {
+            // Fallback: Try to grab the rest of the string after verdict/confidence if keyword missing
+            const lines = rawContent.split('\n');
+            if (lines.length > 2) { // Assume explanation is on 3rd line or later if keyword missing
+                explanation = lines.slice(2).join('\n').trim();
+                console.log(`${logPrefix} Parsed Explanation (fallback): ${explanation}`);
+            } else if (lines.length > 1 && !confMatch) { // Assume explanation is on 2nd line if confidence missing
+                 explanation = lines.slice(1).join('\n').trim();
+                 console.log(`${logPrefix} Parsed Explanation (fallback 2): ${explanation}`);
+            } else {
+                 console.warn(`${logPrefix} Could not find 'Explanation:' line or use fallback.`); explanation = "Parsing failed, check raw response.";
+            }
+        }
+        // --- End Flexible Parsing Logic ---
+
+        console.log(`${logPrefix} Final Evaluation Result Object: { evaluation: ${evaluation}, confidence: ${confidence.toFixed(2)} }`);
         // Return object matching LLMEvaluationResult type
         return { evaluation, confidence: parseFloat(confidence.toFixed(2)), explanation };
+
     } catch (error: any) {
         const axiosError = error as AxiosError; let detailedErrorMessage = axiosError.message.split('\n')[0]; let statusCode: number | string = axiosError.code || 'N/A';
         console.error(`\n--- ERROR in evaluateAnswerWithLLM (${logPrefix}) ---`);
@@ -221,21 +286,21 @@ export async function generateClaim( // Ensure EXPORT keyword is present if need
     requestContext?: string
 ): Promise<string> {
     if (!isGeneratorInitialized) { return "Error: Generator service not initialized (Missing API Key?)."; }
-    if (!question || !knowledgeBaseCid) { return "Error: Missing question or CID for claim generation."; }
+    if (!question || !knowledgeBaseCid ) { return "Error: Missing question or CID for claim generation."; }
 
     const agentType = "ClaimGen";
     await waitForRateLimit(requestContext, agentType);
     const logPrefix = `[Generator Service - ${agentType} | ${requestContext?.substring(0, 10)}...]`;
 
-    console.log(`${logPrefix} Fetching content for claim generation (CID: ${knowledgeBaseCid.substring(0, 10)}...)`);
+    console.log(`${logPrefix} Fetching content for claim generation (CID: ${knowledgeBaseCid.substring(0,10)}...)`);
     const paperContent = await fetchContentByCid(knowledgeBaseCid);
-    if (!paperContent) { return `Error: Could not fetch knowledge base content (CID: ${knowledgeBaseCid.substring(0, 10)}...).`; }
+    if (!paperContent) { return `Error: Could not fetch knowledge base content (CID: ${knowledgeBaseCid.substring(0,10)}...).`; }
     console.log(`${logPrefix} Content fetched. Requesting CLAIM generation...`);
 
     const systemPrompt = 'Based *only* on the following TEXT EXCERPT, provide a concise, verifiable factual claim...'; // Keep prompt
     const truncatedContent = truncateText(paperContent, 3500);
     const userPrompt = `TEXT EXCERPT:\n---\n${truncatedContent}\n---\n\nQUESTION: "${question}"\n\nCLAIM:`;
-    const payload = { model: MODEL_IDENTIFIER, messages: [{ role: "system", content: systemPrompt }, { role: "user", content: userPrompt }], max_tokens: MAX_TOKENS_CLAIM, temperature: TEMPERATURE_CLAIM };
+    const payload = { model: MODEL_IDENTIFIER, messages: [ { role: "system", content: systemPrompt }, { role: "user", content: userPrompt } ], max_tokens: MAX_TOKENS_CLAIM, temperature: TEMPERATURE_CLAIM };
 
     try {
         const response = await axios.post(OPENROUTER_API_URL, payload, { headers: { 'Authorization': `Bearer ${API_KEY}`, 'Content-Type': 'application/json', 'HTTP-Referer': `http://localhost:${config.port || 3001}`, 'X-Title': 'Kintask ClaimGen', }, timeout: 60000 });
@@ -243,7 +308,7 @@ export async function generateClaim( // Ensure EXPORT keyword is present if need
         const claim = response.data?.choices?.[0]?.message?.content?.trim();
         if (!claim) { throw new Error("LLM returned empty claim content."); }
         console.log(`${logPrefix} Generated Claim: "${truncateText(claim, 100)}"`);
-        return claim;   
+        return claim;
     } catch (error: any) {
         const axiosError = error as AxiosError; let detailedErrorMessage = axiosError.message.split('\n')[0]; let statusCode: number | string = axiosError.code || 'N/A';
         console.error(`\n--- ERROR in generateClaim (${logPrefix}) ---`);

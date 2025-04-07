@@ -1,7 +1,6 @@
 // types/index.ts
 
 // --- Knowledge Fragment Types ---
-// Basic structures, can be expanded if needed
 export interface KnowledgeFragmentProvenance {
     sourceType?: 'research_paper' | 'web_page' | 'user_upload' | 'derived';
     sourceUri?: string;
@@ -26,21 +25,17 @@ export interface KnowledgeFragment {
     embedding?: number[];
 }
 
-// --- LLM Verification Result Structure (Used by generator/verifier/evaluator) ---
-// Define and Export this interface
+// --- LLM Verification Result Structure ---
 export interface LLMVerificationResult {
     verdict: 'Supported' | 'Contradicted' | 'Neutral'; // For claim verification
     confidence: number; // 0.0 - 1.0
     explanation?: string; // Brief explanation
 }
-
-// Define Evaluation-specific result structure
 export interface LLMEvaluationResult {
     evaluation: 'Correct' | 'Incorrect' | 'Uncertain'; // For answer evaluation
     confidence: number; // 0.0 - 1.0
     explanation?: string; // Brief explanation
 }
-
 
 // --- Verification Status (Final outcome of evaluation/aggregation) ---
 export type VerificationStatus =
@@ -52,124 +47,90 @@ export type VerificationStatus =
     | 'Error: Aggregation Failed'
     | 'Error: Timelock Failed';
 
-
 // --- Asynchronous Job Statuses (Used in Recall objects & Status API) ---
 export type JobStatus =
     | 'PendingAnswer'
-    | 'PendingEvaluation'     // Answers submitted, waiting for evaluation
-    | 'EvaluationInProgress'  // Evaluation agent is processing this context
-    | 'PendingPayout'         // Evaluation complete, results logged, waiting for payout agent
-    | 'PayoutInProgress'      // Payout agent is processing this context
-    | 'PayoutComplete'        // Payout processing finished (check payout log for details)
-    | 'Completed'             // Alternative final state if PayoutComplete isn't used
-    | 'NoValidAnswers'        // Evaluation finished, but no answers deemed 'Correct'
-    | 'Error';                // Error occurred at some stage (check error logs)
-
+    | 'PendingEvaluation'
+    | 'EvaluationInProgress'
+    | 'PendingPayout'
+    | 'PayoutInProgress'
+    | 'PayoutComplete'
+    | 'Completed'
+    | 'NoValidAnswers'
+    | 'Error';
 
 // --- Data Structures Stored in Recall ---
 
-// Stored under: questions/{requestContext}.json
+// questions/{requestContext}.json
 export interface QuestionData {
-    question: string;
-    cid: string; // Knowledge Base CID
-    status: JobStatus; // Tracks the overall status of the request
-    timestamp: string; // ISO 8601 submission time
-    requestContext: string; // Unique ID for the entire flow
-    userId?: string;
-    paymentRef?: string;
-    callbackUrl?: string;
+    question: string; cid: string; status: JobStatus; timestamp: string;
+    requestContext: string; userId?: string; paymentRef?: string; callbackUrl?: string;
 }
 
-// Stored under: answers/{requestContext}/{agentId}.json
+// answers/{requestContext}/{agentId}.json
 export interface AnswerData {
-    answer: string;
-    answeringAgentId: string; // e.g., the agent's public key address
-    status: 'Submitted'; // Status for this specific answer entry
-    timestamp: string; // ISO 8601 answering time
-    requestContext: string; // Link back to the question
-    confidence?: number; // Optional: Confidence score from answering agent
-    modelUsed?: string; // Optional: LLM model used by agent
+    answer: string; answeringAgentId: string; status: 'Submitted'; timestamp: string;
+    requestContext: string; confidence?: number; modelUsed?: string;
 }
 
-// Stored under: verdicts/{requestContext}/{verifierAgentId}.json (If separate verification step exists)
+// verdicts/{requestContext}/{verifierAgentId}.json (If used)
 export interface VerdictData {
-    verdict: 'Correct' | 'Incorrect' | 'Uncertain'; // Verifier's opinion
-    confidence: number;
-    explanation?: string;
-    verifyingAgentId: string;
-    timestamp: string;
-    requestContext: string;
+    verdict: 'Correct' | 'Incorrect' | 'Uncertain'; confidence: number; explanation?: string;
+    verifyingAgentId: string; timestamp: string; requestContext: string;
     evidenceSnippets?: { startChar: number; endChar: number }[];
 }
 
-// Stored under: evaluation/{requestContext}.json
+// evaluation/{requestContext}.json
 export interface EvaluationResult {
-    evaluatorAgentId: string; // ID of the backend/agent performing the evaluation
-    timestamp: string; // ISO 8601 when evaluation was completed & logged
-    requestContext: string;
-    // Array of evaluations for each answer submitted for this context
+    evaluatorAgentId: string; timestamp: string; requestContext: string;
     results: Array<{
-        answeringAgentId: string; // ID of the agent whose answer was evaluated
-        answerKey: string; // Recall key of the specific answer evaluated
-        evaluation: 'Correct' | 'Incorrect' | 'Uncertain'; // Judge LLM's verdict
-        confidence?: number; // Judge LLM's confidence in its evaluation
-        explanation?: string; // Judge LLM's reasoning
+        answeringAgentId: string; answerKey: string;
+        evaluation: 'Correct' | 'Incorrect' | 'Uncertain';
+        confidence?: number; explanation?: string;
     }>;
-    // Status reflects the outcome of the evaluation process for this requestContext
-    // Added 'PayoutComplete' based on error TS2322
     status: 'PendingPayout' | 'Error' | 'NoValidAnswers' | 'PayoutComplete';
 }
 
-// Stored under: payouts/{requestContext}.json
+// payouts/{requestContext}.json
 export interface PayoutStatusData {
-    payoutAgentId: string; // ID of the backend/agent initiating payout
-    payoutTimestamp: string; // ISO 8601 when payout processing was logged
-    requestContext: string;
-    stage: string; // Last attempted stage (e.g., RegisterAgent_abc, SubmitResult_abc, TriggerAggregation)
-    success: boolean; // Overall success of the payout process attempt for this context
-    message: string; // Summary message (e.g., "Processed 2 payouts", "Aggregation failed")
-    txHashes: Record<string, string>; // Record of relevant transaction hashes
+    payoutAgentId: string; payoutTimestamp: string; requestContext: string;
+    stage: string; success: boolean; message: string;
+    txHashes: Record<string, string>;
+    processedAgents?: number;
+    correctAnswers?: number;
+    submissionsSent?: number;
+    fvmErrors?: number; // <-- ADDED fvmErrors field
 }
 
 
 // --- API Response for Status Check (`GET /api/status/{requestContext}`) ---
 export interface RequestStatus {
-    requestContext: string;
-    status: JobStatus | 'Not Found' | 'Error'; // Overall derived status
-    question?: string;
-    cid?: string;
-    submittedAt: string;
-    hasAnswers?: boolean;
-    answerCount?: number;
-    evaluationStatus?: EvaluationResult['status']; // Status from the evaluation object
-    payoutStatus?: PayoutStatusData['success']; // true/false if processing occurred
+    requestContext: string; status: JobStatus | 'Not Found' | 'Error';
+    question?: string; cid?: string; submittedAt: string;
+    hasAnswers?: boolean; answerCount?: number;
+    evaluationStatus?: EvaluationResult['status'];
+    payoutStatus?: PayoutStatusData['success']; // Use boolean for API
     payoutMessage?: string;
-    finalVerdict?: VerificationStatus; // If available from contract or final state
+    finalVerdict?: VerificationStatus;
     error?: string;
-    // Removed 'evaluation' field to avoid returning potentially large nested object
 }
 
 
-// --- Internal Result Structure (Used by synchronous /verify flow) ---
+// --- Internal Result Structure (Sync Flow) ---
 export interface VerificationResultInternal {
-  finalVerdict: VerificationStatus;
-  confidenceScore: number;
-  usedFragmentCids: string[];
-  reasoningSteps: RecallLogEntryData[]; // Local trace for sync flow
-  timelockRequestId?: string;
-  timelockCommitTxHash?: string;
-  ciphertextHash?: string;
-  aggregationTxHash?: string; // If sync flow interacts with aggregator
+  finalVerdict: VerificationStatus; confidenceScore: number; usedFragmentCids: string[];
+  reasoningSteps: RecallLogEntryData[]; timelockRequestId?: string; timelockCommitTxHash?: string;
+  ciphertextHash?: string; aggregationTxHash?: string;
 }
 
 // --- Recall Logging Event Types ---
-// Comprehensive list covering both sync and async flows
 export type RecallEventType =
     | 'QUESTION_LOGGED' | 'ANSWER_LOGGED' | 'VERDICT_LOGGED' | 'EVALUATION_LOGGED' | 'PAYOUT_LOGGED' | 'ERROR_LOGGED'
     | 'AGENT_POLL' | 'AGENT_JOB_START' | 'AGENT_KB_FETCH_START' | 'AGENT_KB_FETCH_SUCCESS' | 'AGENT_KB_FETCH_FAILURE'
     | 'AGENT_LLM_CALL_START' | 'AGENT_LLM_CALL_SUCCESS' | 'AGENT_LLM_CALL_FAILURE'
     | 'AGENT_FVM_CALL_START' | 'AGENT_FVM_CALL_SUCCESS' | 'AGENT_FVM_CALL_FAILURE' | 'AGENT_JOB_COMPLETE' | 'AGENT_ERROR'
     | 'AGGREGATION_TRIGGERED' | 'AGGREGATION_COMPLETE' | 'REWARD_DISTRIBUTION_START' | 'REWARD_DISTRIBUTION_COMPLETE'
+    // Sync flow events
     | 'VERIFICATION_START' | 'KNOWLEDGE_FETCH_ATTEMPT' | 'KNOWLEDGE_FETCH_SUCCESS'
     | 'TIMELOCK_COMMIT_ATTEMPT' | 'TIMELOCK_COMMIT_SUCCESS' | 'TIMELOCK_COMMIT_FAILURE' | 'TIMELOCK_REVEAL_RECEIVED'
     | 'VERIFICATION_COMPLETE' | 'REASONING_STEP' | 'VERIFICATION_ERROR'
@@ -193,7 +154,6 @@ export interface ApiVerifyResponse { // For Sync /verify flow
 }
 
 // Declaration for formatGwei helper used in recallService logging
-// Note: This is just a type declaration, the implementation is in recallService.ts
 declare function formatGwei(value: bigint): string;
 
 // ==== ./src/types/index.ts ====

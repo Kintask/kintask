@@ -17,7 +17,8 @@
     "@types/node": "^20.11.0",
     "@web3-storage/w3up-client": "^14.0.0",
     "axios": "^1.6.8",
-    "dotenv": "^16.4.5",
+    "dotenv": "^16.4.7",
+    "ethers": "5",
     "files-from-path": "^1.0.3",
     "viem": "^2.25.0"
   }
