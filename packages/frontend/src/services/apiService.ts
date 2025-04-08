@@ -1,35 +1,45 @@
 import axios, { AxiosError } from 'axios';
-import { ApiVerifyResponse, VerificationStatus } from '@/types'; // Use local type definition & path alias
+// Import necessary types, including the new AskApiResponse and ApiErrorResponse
+import { AskApiResponse, ApiVerifyResponse, VerificationStatus, ApiErrorResponse } from '@/types';
 
 // Base URL will be proxied by Vite dev server to the backend
-// Do NOT include localhost here, Vite proxy handles it
-const API_BASE_URL = '/api';
+const API_BASE_URL = '/api'; // Use the proxy path
 
 /**
- * Sends a question to the backend /api/verify endpoint.
- * Handles API calls and basic error structuring.
+ * Submits a question and an optional Knowledge Base IPFS CID to the /api/ask endpoint.
+ * This endpoint initiates an asynchronous process.
+ *
  * @param question The user's question string.
- * @returns A promise resolving to the ApiVerifyResponse object.
+ * @param knowledgeBaseCid Optional IPFS Content Identifier string for the knowledge base.
+ * @returns A promise resolving to either AskApiResponse on success or ApiErrorResponse on failure.
  */
-export async function sendMessage(question: string): Promise<ApiVerifyResponse> {
-  console.log(`[API Service] Sending question: "${question.substring(0, 50)}..."`);
+export async function submitAskRequest(question: string, knowledgeBaseCid?: string): Promise<AskApiResponse | ApiErrorResponse> {
+  const trimmedQuestion = question.trim();
+  const trimmedKnowledgeBaseCid = knowledgeBaseCid?.trim();
 
-  // Basic input check
-  if (!question || typeof question !== 'string' || question.trim().length === 0) {
-       console.error('[API Service] Attempted to send an empty question.');
+  console.log(`[API Service ASK] Submitting question: "${trimmedQuestion.substring(0, 50)}..."` + (trimmedKnowledgeBaseCid ? ` with KB CID: ${trimmedKnowledgeBaseCid.substring(0, 10)}...` : ''));
+
+  if (!trimmedQuestion) {
+       console.error('[API Service ASK] Attempted to send an empty question.');
        return {
-           answer: "Cannot send an empty question.",
-           status: "Error: Verification Failed",
-           error: "Invalid input: Question cannot be empty.",
+           isError: true,
+           error: "Question cannot be empty.",
        };
   }
 
+  const requestBody: { question: string; knowledgeBaseCid?: string } = {
+      question: trimmedQuestion
+  };
+  if (trimmedKnowledgeBaseCid) {
+      requestBody.knowledgeBaseCid = trimmedKnowledgeBaseCid;
+  }
+
   try {
-    // Use the proxied path
-    const response = await axios.post<ApiVerifyResponse>(`${API_BASE_URL}/verify`,
-      { question: question.trim() }, // Send trimmed question
+    // Target the /ask endpoint
+    const response = await axios.post<AskApiResponse>(`${API_BASE_URL}/ask`,
+      requestBody,
       {
-          timeout: 90000, // Increase timeout (90s) to allow for complex verification + LLM + network
+          timeout: 30000, // Shorter timeout for initial submission (adjust if needed)
           headers: {
               'Content-Type': 'application/json',
               'Accept': 'application/json',
@@ -37,73 +47,97 @@ export async function sendMessage(question: string): Promise<ApiVerifyResponse> 
       }
     );
 
-    console.log("[API Service] Received raw response:", response);
+    console.log("[API Service ASK] Received raw response status:", response.status);
+    console.log("[API Service ASK] Received raw response data:", response.data);
 
-    // --- Response Data Validation ---
-    // Check if response.data exists and has the essential fields
-    if (!response.data || typeof response.data.answer !== 'string' || typeof response.data.status !== 'string') {
-         console.error("[API Service] Invalid response structure received:", response.data);
-         throw new Error("Received invalid or incomplete data structure from the backend.");
+    // --- Response Data Validation for /ask endpoint ---
+    if (!response.data || typeof response.data.message !== 'string' || typeof response.data.requestContext !== 'string' || typeof response.data.recallKey !== 'string') {
+         console.error("[API Service ASK] Invalid response structure received from /ask:", response.data);
+         throw new Error("Received invalid or incomplete data structure from the /ask endpoint.");
     }
 
-    // Optional: More specific type checks if needed (e.g., confidence is number or undefined)
-    if (response.data.confidence !== undefined && typeof response.data.confidence !== 'number') {
-         console.warn("[API Service] Received confidence value is not a number:", response.data.confidence);
-         // Decide how to handle - nullify it or keep potentially bad data?
-         // response.data.confidence = undefined;
-    }
-    // ... add checks for other fields like usedFragmentCids (array), recallTrace (array) ...
-
-    console.log("[API Service] Parsed response data:", response.data);
-    return response.data;
+    console.log("[API Service ASK] Parsed successful /ask response data:", response.data);
+    return response.data; // Return AskApiResponse on success
 
   } catch (error: any) {
-    console.error('[API Service] Error sending message or processing response:', error);
+    console.error('[API Service ASK] Error submitting request:', error);
 
-    let errorStatus: VerificationStatus = "Error: Verification Failed";
-    let errorMessage = 'An unknown API error occurred.';
+    let errorMessage = 'An unknown error occurred while submitting the request.';
     let errorDetails: string | undefined = undefined;
 
     if (axios.isAxiosError(error)) {
-        const axiosError = error as AxiosError<ApiVerifyResponse>; // Type assertion for Axios errors
+        const axiosError = error as AxiosError<any>;
+
         if (axiosError.code === 'ECONNABORTED' || axiosError.message.toLowerCase().includes('timeout')) {
-            errorMessage = "The request timed out. The server might be busy or the verification process took too long.";
+            errorMessage = "The request submission timed out.";
             errorDetails = `Timeout after ${axiosError.config?.timeout}ms.`;
         } else if (axiosError.response) {
-            // The request was made and the server responded with a status code
-            // that falls out of the range of 2xx
-            console.error('[API Service] Server responded with error status:', axiosError.response.status, axiosError.response.data);
-            errorMessage = `Server error: ${axiosError.response.status}`;
-            // Try to use error message from backend response body if available
-            if (axiosError.response.data?.error) {
-                errorMessage = axiosError.response.data.error;
-                errorDetails = axiosError.response.data.details;
-            } else if (typeof axiosError.response.data === 'string') {
-                 errorDetails = axiosError.response.data; // Use raw response if it's just a string
-            }
-             // Map HTTP status to VerificationStatus if needed (e.g., 400 -> Error)
-             // errorStatus = mapHttpStatusToVerificationStatus(axiosError.response.status);
+            const statusCode = axiosError.response.status;
+            const responseData = axiosError.response.data;
+             console.error(`[API Service ASK] Server responded with error status: ${statusCode}`, responseData);
+             errorMessage = `Server error (${statusCode}) during submission.`;
+             // Try to get more specific error from response data
+             const backendErrorMsg = (typeof responseData === 'object' && responseData !== null)
+                ? responseData.error || responseData.message || responseData.detail
+                : (typeof responseData === 'string' ? responseData : null);
+             if (typeof backendErrorMsg === 'string' && backendErrorMsg.trim() !== '') {
+                 errorMessage = backendErrorMsg;
+             }
+             errorDetails = `Status: ${statusCode}. Response: ${typeof responseData === 'object' ? JSON.stringify(responseData) : String(responseData).substring(0, 200)}`;
+
         } else if (axiosError.request) {
-            // The request was made but no response was received
-            console.error('[API Service] No response received:', axiosError.request);
-            errorMessage = "Could not connect to the server. Please check if the backend is running.";
+            console.error('[API Service ASK] No response received:', axiosError.request);
+            errorMessage = "Could not connect to the server for submission.";
         } else {
-            // Something happened in setting up the request that triggered an Error
             errorMessage = `Error setting up request: ${axiosError.message}`;
         }
     } else if (error instanceof Error) {
-         // Non-Axios error (e.g., validation error thrown above, or other unexpected issue)
-         errorMessage = error.message;
+         errorMessage = error.message; // e.g., the validation error thrown above
     }
 
-    console.error(`[API Service] Processed Error: ${errorMessage} ${errorDetails ? `(${errorDetails})` : ''}`);
+    console.error(`[API Service ASK] Processed Error: ${errorMessage} ${errorDetails ? `| Details: ${errorDetails}` : ''}`);
 
-    // Return a structured error response for the UI
+    // Return the structured error response
     return {
-        answer: "An error occurred while processing your request.", // Generic answer on error
-        status: errorStatus, // Default error status
+        isError: true,
         error: errorMessage,
         details: errorDetails,
     };
   }
 }
+
+
+// Placeholder for the function to fetch status/results later
+// This would likely hit /api/status/{requestContext}
+export async function getVerificationResult(requestContext: string): Promise<ApiVerifyResponse | ApiErrorResponse> {
+     console.log(`[API Service STATUS] Requesting status for: ${requestContext}`);
+     // TODO: Implement fetching from /api/status/{requestContext}
+     // Example structure:
+     // try {
+     //     const response = await axios.get(`${API_BASE_URL}/status/${requestContext}`);
+     //     // Validate response.data against ApiVerifyResponse structure
+     //     if (/* response indicates still processing */) {
+     //         return { answer: "Processing...", status: "Pending Verification" }; // Or a specific pending status
+     //     }
+     //     if (/* validation passes */) {
+     //         return response.data as ApiVerifyResponse;
+     //     } else {
+     //          throw new Error("Invalid status response structure");
+     //     }
+     // } catch (error) {
+     //      // Handle errors similar to submitAskRequest
+     //      return { isError: true, error: "Failed to fetch status", details: ... }
+     // }
+
+     // Temporary placeholder response
+      await new Promise(resolve => setTimeout(resolve, 1000)); // Simulate network delay
+      console.warn("[API Service STATUS] Status check not implemented yet.");
+      return {
+          isError: true,
+          error: "Status check feature not implemented.",
+          details: `Requested context: ${requestContext}`
+      };
+}
+
+
+// /src/services/apiService.ts
