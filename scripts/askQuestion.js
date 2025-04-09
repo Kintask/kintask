@@ -55,7 +55,7 @@ async function run() {
 
         // 4. Send Request using imported axios
         const response = await axios.post(BACKEND_API_URL, payload, {
-             headers: { 'Content-Type': 'application/json' },
+             headers: { 'Content-Type': 'application/json' },   
              timeout: 15000
          });
 
