@@ -4,7 +4,7 @@
   "private": true,
   "devDependencies": {
     "@nomicfoundation/hardhat-chai-matchers": "^2.0.0",
-    "@nomicfoundation/hardhat-ethers": "^3.0.0",
+    "@nomicfoundation/hardhat-ethers": "^3.0.8",
     "@nomicfoundation/hardhat-ignition-ethers": "^0.15.4",
     "@nomicfoundation/hardhat-network-helpers": "^1.0.0",
     "@nomicfoundation/hardhat-toolbox": "^5.0.0",
@@ -18,7 +18,7 @@
     "axios": "^1.6.8",
     "chai": "^4.2.0",
     "dotenv": "^16.4.7",
-    "ethers": "^5.8.0",
+    "ethers": "^6.13.5",
     "hardhat": "^2.22.2",
     "hardhat-gas-reporter": "^1.0.8",
     "sol-flattener": "^1.0.1",
@@ -29,6 +29,7 @@
   },
   "dependencies": {
     "@ensdomains/buffer": "^0.1.1",
+    "@openzeppelin/contracts": "^5.2.0",
     "@zondax/filecoin-solidity": "^4.0.3",
     "blocklock-solidity": "latest",
     "solidity-cborutils": "^2.0.0"

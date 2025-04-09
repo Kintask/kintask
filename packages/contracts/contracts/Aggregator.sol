@@ -61,7 +61,7 @@ contract Aggregator {
     event VerdictSubmitted(string indexed requestContext, string agentId, string verdict, uint8 confidence, string evidenceCid);
     event VerdictAggregated(string indexed requestContext, string finalVerdict, uint8 finalConfidence, string[] evidenceCids, uint submissionCount);
     event RewardPaid(string indexed requestContext, address indexed recipient, string reason, string evidenceCid, uint256 amount);
-    event RewardTransferFailed(address indexed recipient, string reason, uint256 amount);
+    event RewardTransferFailed(address indexed recipient, st    ring reason, uint256 amount);
     event AggregationError(string indexed requestContext, string reason);
     event DealCheckResult(string indexed requestContext, string indexed cid, uint64 dealId, bool isActive, int64 activatedEpoch, int64 terminatedEpoch);
 

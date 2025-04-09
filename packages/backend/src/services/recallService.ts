@@ -259,7 +259,9 @@ export async function addObjectToBucket(
             });
 
             if (!txHash) { console.warn(`[Recall Service OVW] addObjectToBucket for key ${key} (Attempt ${attempt}) ended with no txHash. Assuming success.`); return { success: true, bucket: bucketAddr, key }; }
-            console.log(`[Recall Service OVW] Object stored/overwritten (Attempt ${attempt}). Key=${key.split('/').pop()}, Tx=${txHash.slice(0, 12)}...`);
+            console.log(`[Recall Service OVW] Object stored/overwritten (Attempt ${attempt}). Key=${key.split('/').pop()}, Tx=${txHash.slice(0, 12)}..., fileBuffer=${fileBuffer}`);
+
+
             return { success: true, bucket: bucketAddr, key, txHash }; // Success!
 
         } catch (err: any) {
@@ -431,7 +433,9 @@ export async function getPendingJobs(prefix: string): Promise<{ key: string; dat
      catch (initError: any) { console.error(`[Recall Service] getPendingJobs init error for prefix ${prefix}:`, initError.message); return []; }
      try {
          const bucketManager = recall.bucketManager();
-         const { result } = await bucketManager.query(bucketAddr, { prefix, delimiter: '' });
+         const  result  = await bucketManager.query(bucketAddr, { prefix, delimiter: '' });
+
+         console.log(result);
          const objectInfos = (result?.objects ?? []);
          if (!objectInfos.length) { return []; }
          const potentialJobs = objectInfos
