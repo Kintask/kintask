@@ -4,7 +4,7 @@ import { ethers } from 'ethers';
 // Core Components & Services
 import ChatInterface from '@/components/ChatInterface';
 import MessageBubble from '@/components/MessageBubble'; // For History Detail View
-import { submitAskRequest /*, getVerificationResult - TODO */ } from '@/services/apiService';
+import { askQuestion, getVerificationResult } from '@/services/apiService'; // Include getVerificationResult for TODO
 
 // Type Definitions
 import {
@@ -21,27 +21,26 @@ const LOCAL_STORAGE_HISTORY_PREFIX = 'kintask_history_';
 // --- Helper Function ---
 function createSystemMessage(text: string, requestContext?: string, status: VerificationStatus = 'System Notification'): ChatMessage {
     return {
-        id: Date.now() + Math.random(), // Add random to avoid collision on rapid messages
+        id: Date.now() + Math.random(),
         sender: 'System',
         text: text,
-        apiResponse: null, // System messages don't have a full ApiVerifyResponse initially
+        apiResponse: null,
         requestContext: requestContext,
-        // Could potentially set apiResponse.status here if needed
     };
 }
 
-
 // --- App Component ---
-
 function App() {
   // --- State ---
-  const [messages, setMessages] = useState<ChatMessage[]>(() => [createSystemMessage("Welcome to Kintask! Submit a question and Knowledge Base CID to start verification.")]);
-  const [isSubmitting, setIsSubmitting] = useState(false); // Tracks if /ask request is in flight
+  const [messages, setMessages] = useState<ChatMessage[]>(() => [createSystemMessage("Welcome! Submit a question and Knowledge Base CID.")]);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [walletAddress, setWalletAddress] = useState<string | null>(null);
-  const [userHistory, setUserHistory] = useState<HistoryEntry[]>([]); // Holds *completed* entries
+  // userHistory now holds ALL entries, pending or complete
+  const [userHistory, setUserHistory] = useState<HistoryEntry[]>([]);
   const [showHistoryList, setShowHistoryList] = useState<boolean>(false);
   const [selectedHistoryDetail, setSelectedHistoryDetail] = useState<HistoryEntry | null>(null);
-  const [pendingRequests, setPendingRequests] = useState<Set<string>>(new Set()); // Track requests awaiting results
+  // pendingRequests might still be useful for triggering polling
+  const [pendingRequests, setPendingRequests] = useState<Map<string, { question: string; kbCid?: string }>>(new Map());
 
 
   // --- Wallet & History Logic ---
@@ -52,46 +51,106 @@ function App() {
       try {
         const parsedHistory: HistoryEntry[] = JSON.parse(storedHistory);
         if (Array.isArray(parsedHistory)) {
-          // Filter for valid entries that have the final aiMessage populated
+          // Load all entries that have the minimum required fields
           const validHistory = parsedHistory.filter(
-            entry => entry && entry.questionText && entry.requestContext && entry.aiMessage?.apiResponse
+            entry => entry && entry.questionText && entry.requestContext
           );
           setUserHistory(validHistory);
-           console.log(`[History] Loaded ${validHistory.length} completed entries.`);
+          console.log(`[History] Loaded ${validHistory.length} entries (pending & complete).`);
+
+          // Populate pending requests map from loaded history for polling resume (if needed)
+          const initialPending = new Map<string, { question: string; kbCid?: string }>();
+          validHistory.forEach(entry => {
+              if (!entry.aiMessage) { // If aiMessage is missing, it's pending
+                 initialPending.set(entry.requestContext, { question: entry.questionText, kbCid: entry.knowledgeBaseCid });
+              }
+          });
+           setPendingRequests(initialPending);
+           console.log(`[History] Identified ${initialPending.size} pending requests from loaded history.`);
+
         } else {
           setUserHistory([]);
+           setPendingRequests(new Map());
         }
       } catch (error) {
-        console.error("[History] Error parsing history from localStorage:", error);
+        console.error("[History] Error parsing history:", error);
         setUserHistory([]);
+         setPendingRequests(new Map());
       }
     } else {
       setUserHistory([]);
+       setPendingRequests(new Map());
     }
   }, []);
 
-  // TODO: Implement function to save a completed entry to history and localStorage
-  // This should be called *after* getVerificationResult succeeds.
-  const saveCompletedHistoryEntry = useCallback((entry: HistoryEntry) => {
+  // Function to save a PENDING history entry (called right after successful /ask)
+  const savePendingHistoryEntry = useCallback((requestContext: string, question: string, kbCid?: string) => {
        if (!walletAddress) return;
-       console.log("[History] Attempting to save completed entry:", entry.requestContext);
+       console.log("[History] Saving PENDING entry:", requestContext);
+
+        const newEntry: HistoryEntry = {
+            questionText: question,
+            knowledgeBaseCid: kbCid,
+            requestContext: requestContext,
+            // aiMessage is intentionally undefined here
+        };
+
        setUserHistory(prev => {
             // Avoid duplicates based on requestContext
-            if (prev.some(h => h.requestContext === entry.requestContext)) {
-                return prev;
+            if (prev.some(h => h.requestContext === newEntry.requestContext)) {
+                console.warn(`[History] Attempted to save duplicate pending entry for ${requestContext}`);
+                return prev; // Don't add if already exists
             }
-            const updated = [...prev, entry];
+            const updated = [...prev, newEntry];
             try {
                  localStorage.setItem(`${LOCAL_STORAGE_HISTORY_PREFIX}${walletAddress}`, JSON.stringify(updated));
-                 console.log("[History] Saved entry:", entry.requestContext);
-            } catch (e) { console.error("[History] Failed to save to localStorage", e); }
-
+                 console.log("[History] Saved pending entry:", newEntry.requestContext);
+            } catch (e) {
+                console.error("[History] Failed to save pending entry to localStorage", e);
+                // Optionally revert state update on save failure, though unlikely for small entries
+                return prev.filter(entry => entry.requestContext !== newEntry.requestContext);
+            }
             return updated;
        });
   }, [walletAddress]);
 
 
+  // Function to UPDATE a history entry with the final result (called after getVerificationResult succeeds)
+  const updateHistoryEntryWithResult = useCallback((requestContext: string, finalAiMessage: ChatMessage) => {
+     if (!walletAddress) return;
+      console.log("[History] Updating entry with final result:", requestContext);
+
+      setUserHistory(prev => {
+           const entryIndex = prev.findIndex(entry => entry.requestContext === requestContext);
+           if (entryIndex === -1) {
+               console.error(`[History] Cannot find entry with context ${requestContext} to update.`);
+               return prev; // Entry not found
+           }
+
+            const updatedEntry: HistoryEntry = {
+                ...prev[entryIndex],
+                aiMessage: finalAiMessage // Add the final message data
+            };
+
+            const updatedHistory = [...prev];
+            updatedHistory[entryIndex] = updatedEntry; // Replace the old entry
+
+            try {
+                 localStorage.setItem(`${LOCAL_STORAGE_HISTORY_PREFIX}${walletAddress}`, JSON.stringify(updatedHistory));
+                 console.log("[History] Updated entry with result:", requestContext);
+            } catch (e) {
+                console.error("[History] Failed to save updated entry to localStorage", e);
+                 // Revert state if saving fails? Depends on desired robustness.
+                 // return prev;
+            }
+            return updatedHistory; // Return the updated state array
+      });
+
+  }, [walletAddress]);
+
+
   const connectWallet = useCallback(async () => {
+    // ... (connect wallet logic remains the same) ...
     setShowHistoryList(false); setSelectedHistoryDetail(null);
     if (typeof window.ethereum !== 'undefined') {
       try {
@@ -100,76 +159,52 @@ function App() {
         const signerAddress = accounts[0];
         if (signerAddress) {
             setWalletAddress(signerAddress);
-            loadHistory(signerAddress); // Load history for the connected wallet
+            loadHistory(signerAddress); // Load potentially pending history
             setMessages([
                 createSystemMessage("Welcome back! Submit a question and Knowledge Base CID."),
                 createSystemMessage(`Wallet ${signerAddress.substring(0, 6)}...${signerAddress.substring(signerAddress.length - 4)} connected.`)
             ]);
         }
-      } catch (error) {
-        console.error("Failed to connect wallet:", error);
-        setMessages(prev => [...prev, createSystemMessage("Failed to connect wallet. Please try again.")]);
-      }
-    } else {
-       setMessages(prev => [...prev, createSystemMessage("MetaMask (or other Ethereum wallet) not detected. Install it to save history.")]);
-    }
-  }, [loadHistory]); // Include loadHistory in dependencies
+      } catch (error) { console.error("Failed to connect wallet:", error); setMessages(prev => [...prev, createSystemMessage("Failed to connect wallet.")]); }
+    } else { setMessages(prev => [...prev, createSystemMessage("MetaMask not detected.")]); }
+  }, [loadHistory]);
 
   const disconnectWallet = useCallback(() => {
+    // ... (disconnect wallet logic remains the same) ...
       const address = walletAddress;
-      setWalletAddress(null);
-      setUserHistory([]); // Clear history state
-      setShowHistoryList(false);
-      setSelectedHistoryDetail(null);
-      setPendingRequests(new Set()); // Clear pending requests on disconnect
-      setMessages(prev => [...prev, createSystemMessage(`Wallet ${address ? `${address.substring(0, 6)}...` : ''} disconnected. History saving disabled.`)]);
+      setWalletAddress(null); setUserHistory([]); setShowHistoryList(false); setSelectedHistoryDetail(null); setPendingRequests(new Map());
+      setMessages(prev => [...prev, createSystemMessage(`Wallet ${address ? `${address.substring(0, 6)}...` : ''} disconnected.`)]);
   }, [walletAddress]);
+
 
   // --- Main Submission Logic ---
 
   const handleAskSubmit = useCallback(async (question: string, knowledgeBaseCidInput?: string) => {
     const trimmedQuestion = question.trim();
-    // The script requires the CID, so we enforce it here too for consistency
     const trimmedKnowledgeBaseCid = knowledgeBaseCidInput?.trim();
 
     // --- Input Validation ---
-    if (!trimmedQuestion) {
-      setMessages(prev => [...prev, createSystemMessage("Error: Question cannot be empty.")]);
-      return;
-    }
-    if (!trimmedKnowledgeBaseCid || !(trimmedKnowledgeBaseCid.startsWith('Qm') || trimmedKnowledgeBaseCid.startsWith('bafy') || trimmedKnowledgeBaseCid.startsWith('bafk'))) {
-      setMessages(prev => [...prev, createSystemMessage("Error: Please provide a valid Knowledge Base CID (starting with Qm, bafy, or bafk).")]);
-      return;
-    }
-    if (isSubmitting) {
-        console.warn("[Submit] Submission already in progress.");
-        return;
-    }
+    if (!trimmedQuestion) { /* ... */ return; }
+    if (!trimmedKnowledgeBaseCid || !(trimmedKnowledgeBaseCid.startsWith('Qm') || trimmedKnowledgeBaseCid.startsWith('bafy') || trimmedKnowledgeBaseCid.startsWith('bafk'))) { /* ... */ return; }
+    if (isSubmitting) { /* ... */ return; }
 
     // --- UI Updates ---
-    setSelectedHistoryDetail(null); // Close history detail if open
-    setIsSubmitting(true);
+    setSelectedHistoryDetail(null); setIsSubmitting(true);
 
-    // Add User message bubble
+    // Add User message
     const userTimestamp = Date.now();
     const userMessageText = `${trimmedQuestion}\n(Using KB CID: ${trimmedKnowledgeBaseCid.substring(0, 10)}...)`;
-    setMessages(prev => [...prev, {
-      id: userTimestamp,
-      sender: 'User',
-      text: userMessageText,
-      apiResponse: null, // User message doesn't have an API response object
-    }]);
+    setMessages(prev => [...prev, { id: userTimestamp, sender: 'User', text: userMessageText, apiResponse: null }]);
 
-    // Add "Submitting..." system message
+    // Add "Submitting..." message
     const submittingMessage = createSystemMessage("Submitting request...");
     setMessages(prev => [...prev, submittingMessage]);
 
     // --- API Call ---
-    const response = await submitAskRequest(trimmedQuestion, trimmedKnowledgeBaseCid);
+    const response = await askQuestion(trimmedQuestion, trimmedKnowledgeBaseCid);
 
     // --- Handle API Response ---
-    // Remove "Submitting..." message before adding result message
-     setMessages(prev => prev.filter(msg => msg.id !== submittingMessage.id));
+    setMessages(prev => prev.filter(msg => msg.id !== submittingMessage.id)); // Remove "Submitting..."
 
     if ('isError' in response && response.isError) {
       // Submission Failed
@@ -181,103 +216,118 @@ function App() {
       // Submission Successful
       console.log("[App] Submission Successful:", response);
       setMessages(prev => [...prev, createSystemMessage(
-        `--- Submission Successful! ---\nMessage: ${response.message}\nRequest ID: ${response.requestContext}\nRecall Key: ${response.recallKey}\n\n(Checking status periodically - TBD)`,
-        response.requestContext, // Associate context ID with this message
-        'Pending Verification' // Set initial status hint
+        `--- Submission Successful! ---\nMessage: ${response.message}\nRequest ID: ${response.requestContext}\nRecall Key: ${response.recallKey}\n\n(Fetching result...)`, // Updated message
+        response.requestContext,
+        'Pending Verification'
       )]);
-      // Track the pending request
-      setPendingRequests(prev => new Set(prev).add(response.requestContext));
 
-      // TODO: Initiate polling/WebSocket listener for this requestContext
-      // initiateStatusCheck(response.requestContext);
+      // --- SAVE PENDING HISTORY & Track for Polling ---
+      if (walletAddress) {
+          savePendingHistoryEntry(response.requestContext, trimmedQuestion, trimmedKnowledgeBaseCid);
+      }
+      // Add to pending map for polling logic
+       setPendingRequests(prev => new Map(prev).set(response.requestContext, { question: trimmedQuestion, kbCid: trimmedKnowledgeBaseCid }));
+      // TODO: Make sure polling logic uses this map
+
     }
 
-    setIsSubmitting(false); // Submission attempt finished
+    setIsSubmitting(false);
 
-  }, [isSubmitting]); // Dependency: isSubmitting to prevent double clicks
+  }, [isSubmitting, walletAddress, savePendingHistoryEntry]); // Added savePendingHistoryEntry dependency
 
 
-  // --- TODO: Status Checking Logic ---
-  /*
+  // --- Status Checking Logic (Polling Example) ---
+
   useEffect(() => {
-      if (pendingRequests.size === 0) return;
+      if (pendingRequests.size === 0 || !walletAddress) return; // Only poll if connected and pending items exist
 
       const intervalId = setInterval(async () => {
-          console.log("[Status Check] Checking pending requests:", pendingRequests);
-          const promises = Array.from(pendingRequests).map(async (contextId) => {
-              const result = await getVerificationResult(contextId); // Call the (TODO) status check function
-              if ('isError' in result && result.isError) {
-                   console.error(`[Status Check] Error fetching status for ${contextId}:`, result.error);
-                   // Option: Add a system error message? Remove from pending? Retry later?
-                   // setMessages(prev => [...prev, createSystemMessage(`Error checking status for ${contextId}: ${result.error}`)]);
-                   // setPendingRequests(prev => { const next = new Set(prev); next.delete(contextId); return next; });
-              } else if (result.status !== 'Processing' && result.status !== 'Pending Verification') {
-                  // Final status received!
-                  console.log(`[Status Check] Final result for ${contextId}:`, result);
+          console.log("[Status Check] Checking pending requests:", Array.from(pendingRequests.keys()));
+          const checkPromises = Array.from(pendingRequests.keys()).map(async (contextId) => {
+             try {
+                const result = await getVerificationResult(contextId); // Call the status check function
 
-                  // 1. Create the final AI ChatMessage
-                  const finalAiMessage: ChatMessage = {
-                      id: Date.now() + Math.random(),
-                      sender: 'AI',
-                      text: result.answer, // Use the answer from the result
-                      apiResponse: result, // Store the full final response
-                      requestContext: contextId,
-                  };
-                  // 2. Add the AI message to the chat
-                   setMessages(prev => [...prev, finalAiMessage]);
+                if ('isError' in result && result.isError) {
+                     console.error(`[Status Check] Error fetching status for ${contextId}:`, result.error, result.details);
+                     // Decide how to handle check errors - maybe remove from pending after N failures?
+                     // For now, just log and it will retry next interval.
+                      setMessages(prev => prev.map(msg =>
+                         (msg.requestContext === contextId && msg.sender === 'System' && msg.text.includes('Fetching result...'))
+                         ? { ...msg, text: `${msg.text.split('\n\n')[0]}\n\n(Error checking status: ${result.error})` }
+                         : msg
+                     ));
+                } else if (result.status !== 'Processing' && result.status !== 'Pending Verification') {
+                    // Final status received!
+                    console.log(`[Status Check] Final result for ${contextId}:`, result);
 
-                   // 3. Find original question info (if needed for history) - could be stored with pending request ID
-                   // This part is tricky - need to associate the original question/kbCid with contextId
-                   const originalQueryInfo = // ... logic to find original question/kbCid ...
+                    // Create the final AI ChatMessage
+                    const finalAiMessage: ChatMessage = {
+                        id: Date.now() + Math.random(),
+                        sender: 'AI',
+                        text: result.answer, // Use the answer from the result
+                        apiResponse: result, // Store the full final response
+                        requestContext: contextId,
+                    };
+                    // Add the AI message to the chat
+                    // Remove the "Fetching result..." system message before adding the AI one
+                     setMessages(prev => [...prev.filter(m => !(m.sender === 'System' && m.requestContext === contextId)), finalAiMessage]);
 
-                   // 4. If wallet connected, save to history
-                   if (walletAddress && originalQueryInfo) {
-                       saveCompletedHistoryEntry({
-                           questionText: originalQueryInfo.question,
-                           knowledgeBaseCid: originalQueryInfo.kbCid,
-                           requestContext: contextId,
-                           aiMessage: finalAiMessage // Save the final message object
-                       });
-                   }
 
-                  // 5. Remove from pending requests
-                  setPendingRequests(prev => { const next = new Set(prev); next.delete(contextId); return next; });
-              } else {
-                   console.log(`[Status Check] Request ${contextId} still processing (Status: ${result.status})`);
-                   // Update system message status? (Optional)
-                    setMessages(prev => prev.map(msg =>
-                       (msg.requestContext === contextId && msg.sender === 'System')
-                       ? { ...msg, text: msg.text.replace(/\(Status: .*\)/, `(Status: ${result.status})`) } // Basic status update in text
-                       : msg
-                   ));
-              }
+                    // Update the history entry with the final message
+                    updateHistoryEntryWithResult(contextId, finalAiMessage);
+
+
+                    // Remove from pending requests map
+                    setPendingRequests(prev => {
+                        const next = new Map(prev);
+                        next.delete(contextId);
+                        return next;
+                    });
+                } else {
+                    // Still processing
+                    console.log(`[Status Check] Request ${contextId} still processing (Status: ${result.status})`);
+                     // Update the system message text to show current status
+                     setMessages(prev => prev.map(msg =>
+                        (msg.requestContext === contextId && msg.sender === 'System')
+                        ? { ...msg, text: msg.text.replace(/\(.*\)/, `(Status: ${result.status})`) } // Update status in brackets
+                        : msg
+                    ));
+                }
+             } catch (e) { // Catch errors within the async map function
+                 console.error(`[Status Check] Unhandled error checking ${contextId}:`, e);
+             }
           });
-          await Promise.allSettled(promises);
-      }, 10000); // Poll every 10 seconds (adjust interval)
+          await Promise.allSettled(checkPromises); // Wait for all checks in this interval to finish
+      }, 15000); // Poll every 15 seconds
 
-      return () => clearInterval(intervalId); // Cleanup on component unmount or when pendingRequests changes
+      return () => clearInterval(intervalId); // Cleanup interval on unmount or dependency change
 
-  }, [pendingRequests, walletAddress, saveCompletedHistoryEntry]); // Dependencies for the polling effect
-  */
+  }, [pendingRequests, walletAddress, updateHistoryEntryWithResult]); // Dependencies for the polling effect
 
 
   // --- History Detail View Handlers ---
   const handleHistoryItemClick = (entry: HistoryEntry) => {
-      // History entries only contain completed items now due to loadHistory filter
-      setSelectedHistoryDetail(entry);
-      setShowHistoryList(false);
+      if (entry.aiMessage?.apiResponse) {
+        // Only show detail view if the final result exists
+        setSelectedHistoryDetail(entry);
+        setShowHistoryList(false);
+      } else {
+         // Item is pending
+         console.log("Clicked pending history item:", entry.requestContext);
+          setMessages(prev => [...prev, createSystemMessage(`Result for request "${entry.questionText.substring(0,20)}..." (ID: ${entry.requestContext}) is still pending.`)]);
+          setShowHistoryList(false); // Close list after clicking pending
+      }
   }
   const closeHistoryDetail = () => { setSelectedHistoryDetail(null); }
 
   const getHistoryDisplayQuestion = (entry: HistoryEntry): string => {
       const kbCidPart = entry.knowledgeBaseCid ? ` (KB: ${entry.knowledgeBaseCid.substring(0, 6)}...)` : '';
-      // Include request context in display? Maybe too verbose.
-      return `${entry.questionText}${kbCidPart}`;
+      const statusIndicator = entry.aiMessage ? '' : ' (Pending)'; // Indicate pending items
+      return `${entry.questionText}${kbCidPart}${statusIndicator}`;
   }
    const getHistoryTitle = (entry: HistoryEntry): string => {
        const kbCidPart = entry.knowledgeBaseCid ? ` with KB CID ${entry.knowledgeBaseCid}` : '';
-       // Safely access status from the stored aiMessage.apiResponse
-       const statusHint = entry.aiMessage?.apiResponse ? `(Status: ${entry.aiMessage.apiResponse.status})` : '(Status Unavailable)';
+       const statusHint = entry.aiMessage?.apiResponse ? `(Status: ${entry.aiMessage.apiResponse.status})` : '(Pending - Click for status)';
        return `View details for: ${entry.questionText}${kbCidPart} ${statusHint}`;
    }
 
@@ -303,6 +353,7 @@ function App() {
             <>
               <button
                 onClick={() => { setShowHistoryList(!showHistoryList); setSelectedHistoryDetail(null); }}
+                // Disable button if history state itself is empty
                 disabled={userHistory.length === 0}
                 className={`px-3 py-1 rounded text-sm transition-colors shadow ${ userHistory.length > 0 ? 'bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 hover:bg-gray-300 dark:hover:bg-gray-600' : 'bg-gray-100 dark:bg-gray-800 text-gray-400 dark:text-gray-500 cursor-not-allowed' }`}
                 title={showHistoryList ? "Hide History List" : "Show History List"}
@@ -310,6 +361,7 @@ function App() {
                 <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 inline mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
+                {/* Show total count including pending */}
                 ({userHistory.length})
               </button>
               <button
@@ -340,24 +392,35 @@ function App() {
             Encode Club AI Blueprints Hackathon | Filecoin, Recall, Blocklock Demo
         </footer>
 
-        {/* History Panel (List) */}
+        {/* History Panel (List) - Shows Pending and Completed */}
         {walletAddress && showHistoryList && (
             <div className="absolute top-14 right-4 w-64 max-h-[60vh] overflow-y-auto bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg shadow-xl p-3 z-20">
-                <h3 className="text-sm font-semibold mb-2 text-gray-700 dark:text-gray-200 border-b pb-1 dark:border-gray-600 sticky top-0 bg-white dark:bg-gray-800">Completed Queries</h3>
+                <h3 className="text-sm font-semibold mb-2 text-gray-700 dark:text-gray-200 border-b pb-1 dark:border-gray-600 sticky top-0 bg-white dark:bg-gray-800">Query History</h3>
                 {userHistory.length > 0 ? (
                     <ul className="space-y-1 pt-1">
                         {userHistory.slice().reverse().map((entry, index) => {
-                            const displayQuestion = getHistoryDisplayQuestion(entry);
+                            const displayQuestion = getHistoryDisplayQuestion(entry); // Now indicates pending
                             const titleText = getHistoryTitle(entry);
-                            const key = `${entry.requestContext}-${index}`; // Use context ID for key
-                            return ( <li key={key}> <button onClick={() => handleHistoryItemClick(entry)} className="w-full text-left text-xs p-1 rounded text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 truncate" title={titleText} > {displayQuestion} </button> </li> );
+                            const key = `${entry.requestContext}-${index}`;
+                            return (
+                                <li key={key}>
+                                    <button
+                                        onClick={() => handleHistoryItemClick(entry)}
+                                        className={`w-full text-left text-xs p-1 rounded truncate ${entry.aiMessage ? 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700' : 'text-gray-400 dark:text-gray-500 italic cursor-default'}`} // Style pending differently
+                                        title={titleText}
+                                        // Disable button slightly differently for pending items if desired, but onClick handles it
+                                    >
+                                        {displayQuestion}
+                                    </button>
+                                </li>
+                            );
                         })}
                     </ul>
-                ) : ( <p className="text-xs text-gray-500 dark:text-gray-400 italic pt-1">No completed queries found in history.</p> )}
+                ) : ( <p className="text-xs text-gray-500 dark:text-gray-400 italic pt-1">No queries submitted yet.</p> )}
             </div>
         )}
 
-        {/* History Detail View (Modal) */}
+        {/* History Detail View (Modal) - Only shows if aiMessage exists */}
          {walletAddress && selectedHistoryDetail && selectedHistoryDetail.aiMessage?.apiResponse && (
              <div className="fixed inset-0 bg-black bg-opacity-60 dark:bg-opacity-75 flex justify-center items-center p-4 z-30 backdrop-blur-sm" onClick={closeHistoryDetail} >
                  <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl p-4 md:p-6 max-w-xl w-full max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()} >

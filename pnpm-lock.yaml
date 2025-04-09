@@ -21,19 +21,19 @@ importers:
         version: 3.0.3
       hardhat:
         specifier: ^2.22.19
-        version: 2.22.19(bufferutil@4.0.9)(ts-node@10.9.2(@types/node@22.7.5)(typescript@5.8.2))(typescript@5.8.2)(utf-8-validate@5.0.10)
+        version: 2.22.19(bufferutil@4.0.9)(ts-node@10.9.2(@types/node@22.7.5)(typescript@5.8.3))(typescript@5.8.3)(utf-8-validate@5.0.10)
       typescript:
-        specifier: ^5.8.2
-        version: 5.8.2
+        specifier: ^5.8.3
+        version: 5.8.3
 
   packages/backend:
     dependencies:
       '@recallnet/chains':
         specifier: latest
-        version: 0.0.6(bufferutil@4.0.9)(typescript@5.8.2)(utf-8-validate@5.0.10)
+        version: 0.0.7(bufferutil@4.0.9)(typescript@5.8.2)(utf-8-validate@5.0.10)
       '@recallnet/sdk':
         specifier: latest
-        version: 0.0.7(bufferutil@4.0.9)(typescript@5.8.2)(utf-8-validate@5.0.10)
+        version: 0.0.8(bufferutil@4.0.9)(typescript@5.8.2)(utf-8-validate@5.0.10)
       '@web3-storage/w3up-client':
         specifier: ^17.2.0
         version: 17.2.0(encoding@0.1.13)
@@ -261,7 +261,7 @@ importers:
         version: 1.1.4
       viem:
         specifier: ^2.25.0
-        version: 2.25.0(bufferutil@4.0.9)(typescript@5.8.2)(utf-8-validate@5.0.10)
+        version: 2.25.0(bufferutil@4.0.9)(typescript@5.8.3)(utf-8-validate@5.0.10)
 
 packages:
 
@@ -990,20 +990,20 @@ packages:
   '@protobufjs/utf8@1.1.0':
     resolution: {integrity: sha512-Vvn3zZrhQZkkBE8LSuW3em98c0FwgO4nxzv6OdSxPKJIEKY2bGbHn+mhGIPerzI4twdxaP8/0+06HBpwf345Lw==}
 
-  '@recallnet/chains@0.0.6':
-    resolution: {integrity: sha512-GesLuA11tHBSBjd768gUtCFFBMcVTx6Xq18IqeMrYPm2OsITCJUnBxUcafT2T6nQDl4XjF3L1ePZ+fN8IfLnwQ==}
+  '@recallnet/chains@0.0.7':
+    resolution: {integrity: sha512-G2acd2cJ0zCxEfilK8ffPelKftvGznbRnhpy/PV8ybtjudL5uI43lVo49Wzn5it4nNKj1xdDCnqYc4joIltS5g==}
 
-  '@recallnet/contracts@0.0.4':
-    resolution: {integrity: sha512-nF4RhDGqhF7mFcUKteGYx1zXUdfO9jKmlIVhMYYiKfBd67hUhFedQUogYKE9ngg3LQ+S34MxRdJeYxUaPK/Vvg==}
+  '@recallnet/contracts@0.0.5':
+    resolution: {integrity: sha512-SkBFr/oMP1nsAhEUnIMklbVX+5LntdADDtd7ix2xXmS9dYeWlKaeNAcr7OJjLAsbsMp5jayHC8KLXC+VTWVKrQ==}
 
   '@recallnet/fvm@0.0.1':
     resolution: {integrity: sha512-+XV8fXLRU8eCZLaZCKda1XDwxJnJ34nrUHIejZdcqSUH0bXjxjUTAWk8NY/mex8XjWCuZeqKUcspJr0mb9S7UQ==}
 
-  '@recallnet/network-constants@0.0.6':
-    resolution: {integrity: sha512-r2ycx9jH5+nPs9YmQBHoPvdDRzbbB6+FWSntkMh12kZ0W4rsazyIfj3YJClkNR+oBAfbQEi6a+k1jv2fZSkC6A==}
+  '@recallnet/network-constants@0.0.7':
+    resolution: {integrity: sha512-2POyaRjogpibl9LZO+QrtNe+gk1/vodsOCUP7nQDJk7g3SOjEToIJJpD6/TXk90IyKSNFWlJqUdTLWM8R/5sPg==}
 
-  '@recallnet/sdk@0.0.7':
-    resolution: {integrity: sha512-m+KlkI1hoO//rjubAPZ9baO8vu95tVaYN83Cw5IodLGOo5ismBT2VhUg4vT+M+qep4tlDNDxNp45Jhu79DHeSw==}
+  '@recallnet/sdk@0.0.8':
+    resolution: {integrity: sha512-k1r3mva6SsfPTVkwm7SEApL6DgBOn3p5QamqTP7mLHJXRm4EE2Tl9oZLkg3+SHqwCZM18qVSTWvFLtm86hPcpg==}
 
   '@resolver-engine/core@0.2.1':
     resolution: {integrity: sha512-nsLQHmPJ77QuifqsIvqjaF5B9aHnDzJjp73Q1z6apY3e9nqYrx4Dtowhpsf7Jwftg/XzVDEMQC+OzUBNTS+S1A==}
@@ -4875,6 +4875,11 @@ packages:
     engines: {node: '>=14.17'}
     hasBin: true
 
+  typescript@5.8.3:
+    resolution: {integrity: sha512-p1diW6TqL9L07nNxvRMM7hMMw4c5XOo/1ibL4aAIGmSAt9slTE1Xgw5KWuof2uTOvCg9BY7ZRi+GaF+7sfgPeQ==}
+    engines: {node: '>=14.17'}
+    hasBin: true
+
   typical@4.0.0:
     resolution: {integrity: sha512-VAH4IvQ7BDFYglMd7BPRDfLgxZZX4O4TFcRDA6EN5X7erNJJq+McIEp8np9aVtxrCJ6qx4GTYVfOWNjcqwZgRw==}
     engines: {node: '>=8'}
@@ -6410,9 +6415,9 @@ snapshots:
 
   '@protobufjs/utf8@1.1.0': {}
 
-  '@recallnet/chains@0.0.6(bufferutil@4.0.9)(typescript@5.8.2)(utf-8-validate@5.0.10)':
+  '@recallnet/chains@0.0.7(bufferutil@4.0.9)(typescript@5.8.2)(utf-8-validate@5.0.10)':
     dependencies:
-      '@recallnet/network-constants': 0.0.6
+      '@recallnet/network-constants': 0.0.7
       viem: 2.26.2(bufferutil@4.0.9)(typescript@5.8.2)(utf-8-validate@5.0.10)
     transitivePeerDependencies:
       - bufferutil
@@ -6420,7 +6425,7 @@ snapshots:
       - utf-8-validate
       - zod
 
-  '@recallnet/contracts@0.0.4(bufferutil@4.0.9)(typescript@5.8.2)(utf-8-validate@5.0.10)':
+  '@recallnet/contracts@0.0.5(bufferutil@4.0.9)(typescript@5.8.2)(utf-8-validate@5.0.10)':
     dependencies:
       viem: 2.26.2(bufferutil@4.0.9)(typescript@5.8.2)(utf-8-validate@5.0.10)
     transitivePeerDependencies:
@@ -6435,15 +6440,15 @@ snapshots:
       cborg: 4.2.9(patch_hash=33jw2nq3s6plcto7rhzybitewe)
       uint8arrays: 5.1.0
 
-  '@recallnet/network-constants@0.0.6': {}
+  '@recallnet/network-constants@0.0.7': {}
 
-  '@recallnet/sdk@0.0.7(bufferutil@4.0.9)(typescript@5.8.2)(utf-8-validate@5.0.10)':
+  '@recallnet/sdk@0.0.8(bufferutil@4.0.9)(typescript@5.8.2)(utf-8-validate@5.0.10)':
     dependencies:
       '@noble/hashes': 1.7.1
-      '@recallnet/chains': 0.0.6(bufferutil@4.0.9)(typescript@5.8.2)(utf-8-validate@5.0.10)
-      '@recallnet/contracts': 0.0.4(bufferutil@4.0.9)(typescript@5.8.2)(utf-8-validate@5.0.10)
+      '@recallnet/chains': 0.0.7(bufferutil@4.0.9)(typescript@5.8.2)(utf-8-validate@5.0.10)
+      '@recallnet/contracts': 0.0.5(bufferutil@4.0.9)(typescript@5.8.2)(utf-8-validate@5.0.10)
       '@recallnet/fvm': 0.0.1
-      '@recallnet/network-constants': 0.0.6
+      '@recallnet/network-constants': 0.0.7
       '@sindresorhus/fnv1a': 3.1.0
       file-type: 19.6.0
       uint8arrays: 5.1.0
@@ -7269,6 +7274,10 @@ snapshots:
   abitype@1.0.8(typescript@5.8.2):
     optionalDependencies:
       typescript: 5.8.2
+
+  abitype@1.0.8(typescript@5.8.3):
+    optionalDependencies:
+      typescript: 5.8.3
 
   abortcontroller-polyfill@1.7.8: {}
 
@@ -9078,7 +9087,7 @@ snapshots:
       - supports-color
       - utf-8-validate
 
-  hardhat@2.22.19(bufferutil@4.0.9)(ts-node@10.9.2(@types/node@22.7.5)(typescript@5.8.2))(typescript@5.8.2)(utf-8-validate@5.0.10):
+  hardhat@2.22.19(bufferutil@4.0.9)(ts-node@10.9.2(@types/node@22.7.5)(typescript@5.8.3))(typescript@5.8.3)(utf-8-validate@5.0.10):
     dependencies:
       '@ethersproject/abi': 5.8.0
       '@metamask/eth-sig-util': 4.0.1
@@ -9125,8 +9134,8 @@ snapshots:
       uuid: 8.3.2
       ws: 7.5.10(bufferutil@4.0.9)(utf-8-validate@5.0.10)
     optionalDependencies:
-      ts-node: 10.9.2(@types/node@22.7.5)(typescript@5.8.2)
-      typescript: 5.8.2
+      ts-node: 10.9.2(@types/node@22.7.5)(typescript@5.8.3)
+      typescript: 5.8.3
     transitivePeerDependencies:
       - bufferutil
       - c-kzg
@@ -9908,6 +9917,20 @@ snapshots:
       eventemitter3: 5.0.1
     optionalDependencies:
       typescript: 5.8.2
+    transitivePeerDependencies:
+      - zod
+
+  ox@0.6.9(typescript@5.8.3):
+    dependencies:
+      '@adraffy/ens-normalize': 1.11.0
+      '@noble/curves': 1.8.1
+      '@noble/hashes': 1.7.1
+      '@scure/bip32': 1.6.2
+      '@scure/bip39': 1.5.4
+      abitype: 1.0.8(typescript@5.8.3)
+      eventemitter3: 5.0.1
+    optionalDependencies:
+      typescript: 5.8.3
     transitivePeerDependencies:
       - zod
 
@@ -11079,6 +11102,25 @@ snapshots:
       yn: 3.1.1
     optional: true
 
+  ts-node@10.9.2(@types/node@22.7.5)(typescript@5.8.3):
+    dependencies:
+      '@cspotcode/source-map-support': 0.8.1
+      '@tsconfig/node10': 1.0.11
+      '@tsconfig/node12': 1.0.11
+      '@tsconfig/node14': 1.0.3
+      '@tsconfig/node16': 1.0.4
+      '@types/node': 22.7.5
+      acorn: 8.14.1
+      acorn-walk: 8.3.4
+      arg: 4.1.3
+      create-require: 1.1.1
+      diff: 4.0.2
+      make-error: 1.3.6
+      typescript: 5.8.3
+      v8-compile-cache-lib: 3.0.1
+      yn: 3.1.1
+    optional: true
+
   tsconfig@7.0.0:
     dependencies:
       '@types/strip-bom': 3.0.0
@@ -11156,6 +11198,8 @@ snapshots:
   typedarray@0.0.6: {}
 
   typescript@5.8.2: {}
+
+  typescript@5.8.3: {}
 
   typical@4.0.0: {}
 
@@ -11255,18 +11299,18 @@ snapshots:
       core-util-is: 1.0.2
       extsprintf: 1.3.0
 
-  viem@2.25.0(bufferutil@4.0.9)(typescript@5.8.2)(utf-8-validate@5.0.10):
+  viem@2.25.0(bufferutil@4.0.9)(typescript@5.8.3)(utf-8-validate@5.0.10):
     dependencies:
       '@noble/curves': 1.8.1
       '@noble/hashes': 1.7.1
       '@scure/bip32': 1.6.2
       '@scure/bip39': 1.5.4
-      abitype: 1.0.8(typescript@5.8.2)
+      abitype: 1.0.8(typescript@5.8.3)
       isows: 1.0.6(ws@8.18.1(bufferutil@4.0.9)(utf-8-validate@5.0.10))
-      ox: 0.6.9(typescript@5.8.2)
+      ox: 0.6.9(typescript@5.8.3)
       ws: 8.18.1(bufferutil@4.0.9)(utf-8-validate@5.0.10)
     optionalDependencies:
-      typescript: 5.8.2
+      typescript: 5.8.3
     transitivePeerDependencies:
       - bufferutil
       - utf-8-validate
