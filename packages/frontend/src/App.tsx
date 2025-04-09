@@ -4,7 +4,7 @@ import { ethers } from 'ethers';
 // Core Components & Services
 import ChatInterface from '@/components/ChatInterface';
 import MessageBubble from '@/components/MessageBubble'; // For History Detail View
-import { askQuestion /*, getVerificationResult - TODO */ } from '@/services/apiService';
+import { submitAskRequest /*, getVerificationResult - TODO */ } from '@/services/apiService';
 
 // Type Definitions
 import {
@@ -165,7 +165,7 @@ function App() {
     setMessages(prev => [...prev, submittingMessage]);
 
     // --- API Call ---
-    const response = await askQuestion(trimmedQuestion, trimmedKnowledgeBaseCid);
+    const response = await submitAskRequest(trimmedQuestion, trimmedKnowledgeBaseCid);
 
     // --- Handle API Response ---
     // Remove "Submitting..." message before adding result message
