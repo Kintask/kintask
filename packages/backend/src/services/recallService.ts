@@ -44,8 +44,9 @@ const getAnswersPrefix = (ctx: string) => `${CONTEXT_DATA_PREFIX}${ctx}/answers/
 const getAnswerEvidenceKey = (ctx: string, agentId: Address) => `${CONTEXT_DATA_PREFIX}${ctx}/answers/${agentId}_evidence.json`;
 
 // --- Gas Settings ---
-const MAX_ACCEPTABLE_PRIORITY_FEE_GWEI = '10';
+const MAX_ACCEPTABLE_PRIORITY_FEE_GWEI = '0.005';
 const MAX_ACCEPTABLE_PRIORITY_FEE_WEI = parseGwei(MAX_ACCEPTABLE_PRIORITY_FEE_GWEI);
+
 // *** Gas Limit - Needs Tuning based on network conditions and data size ***
 // Start higher, potentially lower later if consistently successful at lower values.
 // 200k was too low, causing estimation failures. Try 3M as a starting point.
@@ -187,27 +188,84 @@ export async function addObjectToBucket(
                 const feeEstimate = await publicClient!.estimateFeesPerGas();
                 const currentMaxPriorityFee = feeEstimate.maxPriorityFeePerGas ?? 0n;
                 console.log(`[Recall Tx Queue] Est. Priority Fee: ${formatGwei(currentMaxPriorityFee)} Gwei`);
-                if (currentMaxPriorityFee > MAX_ACCEPTABLE_PRIORITY_FEE_WEI) { const errorMsg = `Gas price too high (${formatGwei(currentMaxPriorityFee)} > ${MAX_ACCEPTABLE_PRIORITY_FEE_GWEI} Gwei)`; console.warn(`[Recall Tx Queue] ${errorMsg}. Aborting for key ${key}.`); throw new Error(`GAS_PRICE_TOO_HIGH: ${errorMsg}`); }
+                if (currentMaxPriorityFee > MAX_ACCEPTABLE_PRIORITY_FEE_WEI) {
+                    const errorMsg = `Gas price too high (${formatGwei(currentMaxPriorityFee)} > ${MAX_ACCEPTABLE_PRIORITY_FEE_GWEI} Gwei)`;
+                    console.warn(`[Recall Tx Queue] ${errorMsg}. Waiting and retrying for key ${key}.`);
+                    throw new Error(`GAS_PRICE_TOO_HIGH: ${errorMsg}`);
+                }
                 console.log(`[Recall Tx Queue] Gas price ok. Proceeding with add tx...`);
-                const balanceBefore = await publicClient!.getBalance({ address: currentAccount.address }); console.log(`[Recall Tx Queue] Native Balance pre-tx: ${formatEther(balanceBefore)}`);
+                const balanceBefore = await publicClient!.getBalance({ address: currentAccount.address });
+                console.log(`[Recall Tx Queue] Native Balance pre-tx: ${formatEther(balanceBefore)}`);
                 const callOptions: { gas?: bigint } = { gas: MANUAL_GAS_LIMIT };
                 const { meta } = await bucketManager.add(bucketAddr, key, fileBuffer, callOptions);
                 return meta?.tx?.transactionHash;
             });
-            if (!txHash) { console.warn(`[Recall Service] AddObject for key ${key} (Attempt ${attempt}) no txHash.`); return { success: true, bucket: bucketAddr, key }; }
+            if (!txHash) {
+                console.warn(`[Recall Service] AddObject for key ${key} (Attempt ${attempt}) no txHash.`);
+                return { success: true, bucket: bucketAddr, key };
+            }
             console.log(`[Recall Service] Object added (Attempt ${attempt}). Key=${key.split('/').pop()}, Tx=${txHash.slice(0, 12)}...`);
             return { success: true, bucket: bucketAddr, key, txHash }; // Success!
         } catch (err: any) {
-            let conciseError = `Attempt ${attempt} failed adding object (key=${truncateText(key, 30)})`; let isRetryable = true; let isGasError = false; let isGasPriceError = false;
-            if (err instanceof Error && err.message.startsWith('GAS_PRICE_TOO_HIGH:')) { conciseError = err.message; isGasPriceError = true; isRetryable = false; console.warn(`[Recall Service] Tx deferred (high gas price) key ${key}`); }
-            else if (err instanceof BaseError) { conciseError = `Attempt ${attempt}: ${err.shortMessage || err.message.split('\n')[0]}`; const detailedMessage = err.message?.toLowerCase() || ''; if (detailedMessage.includes('key exists')) { console.error(`[Recall Service] >> UNEXPECTED KEY EXISTS (Attempt ${attempt}) key ${key}. Pre-check failed?`); isRetryable = false; } else if (detailedMessage.includes('out of gas')) { console.error(`[Recall Service] >> OUT OF GAS (Attempt ${attempt}) key ${key}. Limit: ${MANUAL_GAS_LIMIT}.`); isRetryable = false; isGasError = true; } else if (detailedMessage.includes('actor balance') && detailedMessage.includes('less than needed')) { console.error(`[Recall Service] >> INSUFFICIENT NATIVE GAS BALANCE (Attempt ${attempt}) key ${key}`); isRetryable = false; isGasError = true; } else if (err.name === 'HttpRequestError' || conciseError.includes('RPC Request failed') || conciseError.includes('nonce') || conciseError.includes('timeout')) { isRetryable = true; } else { isRetryable = false; } console.error(`[Recall Service] AddObject Viem Error (Attempt ${attempt})`, { key, name: err.name }); }
-            else if (err instanceof Error) { conciseError = `Attempt ${attempt}: ${err.message.split('\n')[0]}`; console.error(`[Recall Service] AddObject Generic Error (Attempt ${attempt})`, { key, name: err.name }); isRetryable = true; }
-            else { conciseError = `Attempt ${attempt}: ${String(err)}`; console.error(`[Recall Service] AddObject Unknown Error (Attempt ${attempt})`, { key, error: err }); isRetryable = true; }
-            if (!isGasPriceError) { console.error(`[Recall Service] addObjectToBucket error (Attempt ${attempt}): ${conciseError}`); }
-            if (isRetryable && attempt < MAX_RPC_RETRIES) { const delay = RETRY_DELAY_MS * Math.pow(2, attempt - 1); console.log(`[Recall Service] Retrying add key ${key} in ${delay / 1000}s...`); await new Promise(resolve => setTimeout(resolve, delay)); }
-            else { if (isGasError) conciseError = `Insufficient native gas or gas limit too low after ${attempt} attempts. Wallet: ${currentAccount.address}. Limit: ${MANUAL_GAS_LIMIT}`; else if (isGasPriceError) conciseError = `Gas price too high after ${attempt} attempts. Threshold: ${MAX_ACCEPTABLE_PRIORITY_FEE_GWEI} Gwei.`; else conciseError = `Failed adding object after ${attempt} attempts: ${conciseError}`; console.error(`[Recall Service] addObjectToBucket failed permanently key ${key}. Error: ${conciseError}`); return { success: false, error: conciseError, key: key, gasPriceTooHigh: isGasPriceError }; }
+            let conciseError = `Attempt ${attempt} failed adding object (key=${truncateText(key, 30)})`;
+            let isRetryable = true;
+            let isGasError = false;
+            let isGasPriceError = false;
+            if (err instanceof Error && err.message.startsWith('GAS_PRICE_TOO_HIGH:')) {
+                conciseError = err.message;
+                isGasPriceError = true;
+                // Marking gas price errors as retryable:
+                isRetryable = true;
+                console.warn(`[Recall Service] Tx deferred (high gas price) key ${key}. Will retry.`);
+            } else if (err instanceof BaseError) {
+                conciseError = `Attempt ${attempt}: ${err.shortMessage || err.message.split('\n')[0]}`;
+                const detailedMessage = err.message?.toLowerCase() || '';
+                if (detailedMessage.includes('key exists')) {
+                    console.error(`[Recall Service] >> UNEXPECTED KEY EXISTS (Attempt ${attempt}) key ${key}. Pre-check failed?`);
+                    isRetryable = false;
+                } else if (detailedMessage.includes('out of gas')) {
+                    console.error(`[Recall Service] >> OUT OF GAS (Attempt ${attempt}) key ${key}. Limit: ${MANUAL_GAS_LIMIT}.`);
+                    isRetryable = false;
+                    isGasError = true;
+                } else if (detailedMessage.includes('actor balance') && detailedMessage.includes('less than needed')) {
+                    console.error(`[Recall Service] >> INSUFFICIENT NATIVE GAS BALANCE (Attempt ${attempt}) key ${key}`);
+                    isRetryable = false;
+                    isGasError = true;
+                } else if (err.name === 'HttpRequestError' || conciseError.includes('RPC Request failed') || conciseError.includes('nonce') || conciseError.includes('timeout')) {
+                    isRetryable = true;
+                } else {
+                    isRetryable = false;
+                }
+                console.error(`[Recall Service] AddObject Viem Error (Attempt ${attempt})`, { key, name: err.name });
+            } else if (err instanceof Error) {
+                conciseError = `Attempt ${attempt}: ${err.message.split('\n')[0]}`;
+                console.error(`[Recall Service] AddObject Generic Error (Attempt ${attempt})`, { key, name: err.name });
+                isRetryable = true;
+            } else {
+                conciseError = `Attempt ${attempt}: ${String(err)}`;
+                console.error(`[Recall Service] AddObject Unknown Error (Attempt ${attempt})`, { key, error: err });
+                isRetryable = true;
+            }
+            if (!isGasPriceError) {
+                console.error(`[Recall Service] addObjectToBucket error (Attempt ${attempt}): ${conciseError}`);
+            }
+            if (isRetryable && attempt < MAX_RPC_RETRIES) {
+                const delay = RETRY_DELAY_MS * Math.pow(2, attempt - 1);
+                console.log(`[Recall Service] Retrying add key ${key} in ${delay / 1000}s...`);
+                await new Promise(resolve => setTimeout(resolve, delay));
+            } else {
+                if (isGasError)
+                    conciseError = `Insufficient native gas or gas limit too low after ${attempt} attempts. Wallet: ${currentAccount.address}. Limit: ${MANUAL_GAS_LIMIT}`;
+                else if (isGasPriceError)
+                    conciseError = `Gas price too high after ${attempt} attempts. Threshold: ${MAX_ACCEPTABLE_PRIORITY_FEE_GWEI} Gwei.`;
+                else
+                    conciseError = `Failed adding object after ${attempt} attempts: ${conciseError}`;
+                console.error(`[Recall Service] addObjectToBucket failed permanently key ${key}. Error: ${conciseError}`);
+                return { success: false, error: conciseError, key: key, gasPriceTooHigh: isGasPriceError };
+            }
         }
     }
+    
     return { success: false, error: `addObjectToBucket did not execute after ${MAX_RPC_RETRIES} attempts`, key: key };
 }
 
