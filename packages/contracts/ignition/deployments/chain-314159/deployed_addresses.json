@@ -1,5 +1,4 @@
 {
-  "AggregatorModule#AggregatorContract": "0xc4EAa1d5F94Ee779EE48Ca1E8f1246d29dF07C6f",
-  "ZKPEvaluatorModule#Groth16Verifier": "0xc13C6cCCC60D7E673B574176Fd15e4df46CdF126",
-  "ZKPEvaluatorModule#ZKPEvaluatorAggregator": "0x4aE1B2656bb2d879D2ed62c590A4f97CfA1eA26f"
+  "ZKPEvaluatorModule#Groth16Verifier": "0x6abc04a3768BA2f50AEE7b58F4456f2287f2C118",
+  "ZKPEvaluatorModule#ZKPEvaluatorAggregator": "0x7c8E9df2CC0BB852432170f5bAFa77Ff6B839Da5"
 }

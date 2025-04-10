@@ -6,7 +6,7 @@ import config from '../config';
 import KintaskCommitmentAbi from '../contracts/abi/KintaskCommitment.json';
 import { KINTASK_COMMITMENT_CONTRACT_ADDRESS } from '../contracts/addresses';
 // Import necessary functions from recallService
-import { logErrorEvent, addObjectToBucket } from './recallService';
+import { addObjectToBucket } from './recallService';
 // Import truncateText utility
 import { truncateText } from '../utils'; // Added import
 
@@ -159,7 +159,7 @@ export async function commitVerdictTimelocked(
 
         console.log(`[Timelock Service Context: ${logContext.substring(0,10)}] Commit Tx Confirmed. Status: ${receipt.status === 1 ? 'Success' : 'Failed'}, Block: ${receipt.blockNumber}`);
         if (receipt.status !== 1) {
-            await logErrorEvent({ stage: 'TimelockCommitTxFailed', txHash: txResponse.hash, blockNumber: receipt.blockNumber, reason: 'On-chain status 0' }, logContext);
+            // await logErrorEvent({ stage: 'TimelockCommitTxFailed', txHash: txResponse.hash, blockNumber: receipt.blockNumber, reason: 'On-chain status 0' }, logContext);
             throw new Error(`Commit transaction ${txResponse?.hash ?? 'unknown'} failed on-chain (Status: 0). Check explorer.`);
         }
 
@@ -206,7 +206,7 @@ export async function commitVerdictTimelocked(
     } catch (error: any) {
         console.error(`[Timelock Service Error Context: ${logContext.substring(0,10)}] Error during commit:`, error.message || error);
         if (txResponse?.hash) console.error(`[Timelock Service] Failing Transaction Hash: ${txResponse.hash}`);
-        await logErrorEvent({ stage: 'TimelockCommitCatch', error: error.message, txHash: txResponse?.hash }, logContext);
+        // await logErrorEvent({ stage: 'TimelockCommitCatch', error: error.message, txHash: txResponse?.hash }, logContext);
         return null;
     }
 }
@@ -237,7 +237,7 @@ export function startRevealListener() {
              const requestContext = blocklockIdToRequestContext.get(blocklockRequestId);
              if (!requestContext) {
                  console.warn(`[Timelock Listener] Could not find request context for revealed Blocklock ID: ${blocklockRequestId}. Ignoring event or logging generically.`);
-                 await logErrorEvent({ stage: 'TimelockRevealNoContext', blocklockRequestId, sourceTxHash: txHash }, `unknownContext_${blocklockRequestId}`);
+                //  await logErrorEvent({ stage: 'TimelockRevealNoContext', blocklockRequestId, sourceTxHash: txHash }, `unknownContext_${blocklockRequestId}`);
                  return;
              }
              console.log(`  Associated Request Context: ${requestContext.substring(0,10)}...`);
@@ -260,10 +260,10 @@ export function startRevealListener() {
 
              } catch(decodeError: any) {
                 console.error(`[Timelock Listener] Error decoding revealed verdict for ID ${blocklockRequestId}, Context ${requestContext}:`, decodeError.message);
-                 await logErrorEvent(
-                    { stage: 'TimelockRevealDecode', error: decodeError.message, blocklockRequestId, rawBytes: utils.hexlify(revealedVerdictBytes) },
-                    requestContext
-                );
+                //  await logErrorEvent(
+                //     { stage: 'TimelockRevealDecode', error: decodeError.message, blocklockRequestId, rawBytes: utils.hexlify(revealedVerdictBytes) },
+                //     requestContext
+                // );
              }
          });
 

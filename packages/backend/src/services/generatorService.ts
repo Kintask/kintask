@@ -1,323 +1,248 @@
-// src/services/generatorService.ts
-import axios, { AxiosError } from 'axios';
+// packages/backend/src/services/generatorService.ts
+import axios, { AxiosError } from 'axios'; // Keep for potential internal use by nillionService or future needs
 import config from '../config';
 import { truncateText } from '../utils';
 import { fetchContentByCid } from './filecoinService';
-// Import specific types needed and re-export LLMVerificationResult AND LLMEvaluationResult
-import {
-    LLMVerificationResult as LLMVerificationResultType,
-    LLMEvaluationResult as LLMEvaluationResultType
-} from '../types';
-export { LLMVerificationResultType as LLMVerificationResult }; // Re-export verification type
-export { LLMEvaluationResultType as LLMEvaluationResult }; // Re-export evaluation type
+import { LLMVerificationResult as LLMVerificationResultType, LLMEvaluationResult as LLMEvaluationResultType } from '../types';
 
-const OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions";
-const API_KEY = config.openRouterApiKey;
-const MODEL_IDENTIFIER = "mistralai/mistral-7b-instruct:free";
+// --- Nillion Service Import ---
+let nillionService: any;
+try {
+    // Use require for potential CommonJS compatibility if nillion service is CJS
+    const nillionServicePath = require.resolve('./nillionSecretLLMService');
+    nillionService = require(nillionServicePath);
+    if (typeof nillionService?.runNillionChatCompletion !== 'function') {
+        throw new Error("Imported nillionService is invalid or missing 'runNillionChatCompletion' function.");
+    }
+    console.log("[Generator Service] Nillion Secret LLM Service imported successfully.");
+} catch (err: any) {
+    // Log error and mark service as unavailable
+    if (err.code === 'MODULE_NOT_FOUND' && err.message.includes('nillionSecretLLMService')) { console.error("[Generator Service] FATAL: nillionSecretLLMService.js not found."); }
+    else { console.error("[Generator Service] FATAL: Could not import nillionSecretLLMService.", err.message); }
+    nillionService = null;
+    // Optional: Exit if Nillion is strictly required
+    // process.exit(1);
+}
 
-// Rate Limiting Configuration
-const RATE_LIMIT_WINDOW_MS = 60 * 1000;
-const MAX_REQUESTS_PER_WINDOW = 10;
-const RATE_LIMIT_RETRY_DELAY_MS = 15000;
-let requestTimestamps: number[] = [];
+// Export types
+export { LLMVerificationResultType as LLMVerificationResult };
+export { LLMEvaluationResultType as LLMEvaluationResult };
 
-// --- Constants for different LLM tasks ---
-const MAX_TOKENS_ANSWER = 250;
-const TEMPERATURE_ANSWER = 0.5;
-const MAX_TOKENS_CLAIM = 100;
-const TEMPERATURE_CLAIM = 0.4;
-const MAX_TOKENS_VERIFY = 50;
-const TEMPERATURE_VERIFY = 0.2;
-const MAX_TOKENS_EVALUATE = 60; // Slightly increase tokens for evaluation response
-const TEMPERATURE_EVALUATE = 0.1; // Lower temp for more deterministic evaluation output
+// --- Constants ---
+// Removed OpenRouter/HF URLs
+
+// Rate Limiting (Keep generic)
+const RATE_LIMIT_WINDOW_MS = 60 * 1000; const MAX_REQUESTS_PER_WINDOW = 10; const RATE_LIMIT_RETRY_DELAY_MS = 15000; let requestTimestamps: number[] = [];
+
+// LLM Task Parameters (Keep generic)
+const MAX_TOKENS_ANSWER = 250; const TEMPERATURE_ANSWER = 0.5;
+const MAX_TOKENS_CLAIM = 100; const TEMPERATURE_CLAIM = 0.4;
+const MAX_TOKENS_VERIFY = 60; const TEMPERATURE_VERIFY = 0.2;
+const MAX_TOKENS_EVALUATE = 80; const TEMPERATURE_EVALUATE = 0.1;
 
 let isGeneratorInitialized = false;
+// Removed currentApiKey, currentApiUrl as they are handled within nillionService now
+let currentModelId: string; // Still need model ID
 
-/** Initializes the generator service, checks API key. */
+/** Initializes the generator service, focusing only on Nillion requirements. */
 function initializeGenerator(): void {
     if (isGeneratorInitialized) return;
-    console.log("[Generator Service] Initializing OpenRouter configuration...");
-    if (!API_KEY) {
-        console.error("[Generator Service] ERROR: OPENROUTER_API_KEY variable is missing or not loaded.");
-        isGeneratorInitialized = false;
-        return;
+    console.log("[Generator Service] Initializing LLM configuration for Nillion...");
+
+    // Check if Nillion service loaded and required config exists
+    if (!nillionService) {
+        console.error("[Generator Service] ERROR: Nillion provider required but nillionSecretLLMService failed to import.");
+        isGeneratorInitialized = false; return;
     }
-    console.log(`[Generator Service] Using API Key starting with: ${API_KEY.substring(0, 10)}...`);
-    console.log(`[Generator Service] Configured model: ${MODEL_IDENTIFIER}`);
+     if (!config.nilaiApiUrl || !config.nilaiApiKey) {
+         console.error("[Generator Service] ERROR: Nillion provider requires NILAI_API_URL and NILAI_API_KEY in config.");
+         isGeneratorInitialized = false; return;
+     }
+
+    currentModelId = config.llmModelIdentifier;
+    if (!currentModelId) {
+         // Use Nillion default if not specified in config
+         currentModelId = "meta-llama/Llama-3.1-8B-Instruct";
+         console.warn(`[Generator Service] LLM_MODEL_IDENTIFIER not set, using default Nillion model: ${currentModelId}`);
+         // Alternatively, treat it as an error:
+         // console.error("[Generator Service] ERROR: LLM_MODEL_IDENTIFIER is required in config.");
+         // isGeneratorInitialized = false; return;
+    }
+
+    console.log(`[Generator Service] Provider: Nillion (Exclusive)`);
+    console.log(`[Generator Service] Using Nillion Model: ${currentModelId}`);
     isGeneratorInitialized = true;
 }
 
-/** Simple rate limiter middleware function. Waits if request limit is hit. */
-async function waitForRateLimit(context?: string, agentType?: string): Promise<void> {
-    const now = Date.now();
-    requestTimestamps = requestTimestamps.filter(ts => now - ts < RATE_LIMIT_WINDOW_MS);
-    const identifier = agentType || `GenericAgent`;
-    const logPrefix = `[Rate Limiter - ${identifier} | ${context?.substring(0, 10)}...]`;
-    while (requestTimestamps.length >= MAX_REQUESTS_PER_WINDOW) {
-        console.warn(`${logPrefix} Rate limit hit (${requestTimestamps.length}/${MAX_REQUESTS_PER_WINDOW}). Waiting ${RATE_LIMIT_RETRY_DELAY_MS / 1000}s...`);
-        await new Promise(resolve => setTimeout(resolve, RATE_LIMIT_RETRY_DELAY_MS));
-        const currentTime = Date.now();
-        requestTimestamps = requestTimestamps.filter(ts => currentTime - ts < RATE_LIMIT_WINDOW_MS);
-    }
-    requestTimestamps.push(now);
+/** Rate limiter */
+async function waitForRateLimit(context?: string, agentType?: string): Promise<void> { const now = Date.now(); requestTimestamps = requestTimestamps.filter(ts => now - ts < RATE_LIMIT_WINDOW_MS); const identifier = agentType || `GenericAgent`; const logPrefix = `[Rate Limiter | ${context?.substring(0, 10)}...]`; while (requestTimestamps.length >= MAX_REQUESTS_PER_WINDOW) { console.warn(`${logPrefix} Rate limit hit (${requestTimestamps.length}/${MAX_REQUESTS_PER_WINDOW}). Wait ${RATE_LIMIT_RETRY_DELAY_MS / 1000}s`); await new Promise(resolve => setTimeout(resolve, RATE_LIMIT_RETRY_DELAY_MS)); const currentTime = Date.now(); requestTimestamps = requestTimestamps.filter(ts => currentTime - ts < RATE_LIMIT_WINDOW_MS); } requestTimestamps.push(now); }
+
+initializeGenerator();
+
+/** Unified error logging for Nillion */
+function logNillionErrorWrapper(error: any, functionName: string, logPrefix: string): string {
+     const providerName = "Nillion";
+     const axiosError = error as AxiosError; let detailedErrorMessage = axiosError.message?.split('\n')[0] || String(error); let statusCode: number | string = axiosError.code || 'N/A';
+     console.error(`\n--- ERROR in ${functionName} (${logPrefix}) [Provider: ${providerName}] ---`);
+     if (axiosError.response) { statusCode = axiosError.response.status; console.error(`[...] API Call FAILED | Status: ${statusCode}`); console.error(`[...] Error Response Data:`, JSON.stringify(axiosError.response.data, null, 2)); detailedErrorMessage = (axiosError.response.data as any)?.error?.message || (axiosError.response.data as any)?.error || `HTTP Error ${statusCode}`; }
+     else if (axiosError.request) { console.error(`[...] Network Error | Status: ${statusCode}`); detailedErrorMessage = `Network Error: ${axiosError.code || 'No response'}`; }
+     else if (!error?.response && error?.message) { detailedErrorMessage = error.message; console.error(`[...] Logic/Response Error: ${detailedErrorMessage}`);}
+     else { console.error(`[...] Setup/Unknown Error | Status: ${statusCode} | Msg: ${detailedErrorMessage}`); }
+     console.error(`[...] Final Error Logged: ${detailedErrorMessage}`); console.error(`--- END ERROR ---`);
+     return detailedErrorMessage; // Return the core message
 }
 
-initializeGenerator(); // Call initialization
+
+/** Check if response data contains an error object */
+function responseHasError(responseData: any): string | null {
+    if (responseData && typeof responseData === 'object' && responseData.error) {
+        if (typeof responseData.error === 'string') return responseData.error;
+        if (typeof responseData.error.message === 'string') return responseData.error.message;
+        return JSON.stringify(responseData.error);
+    }
+    return null;
+}
+
+/** Parses answer from Nillion (assuming OpenAI format) response data */
+function parseAnswerFromResult(responseData: any, logPrefix: string): string | undefined {
+    let answer: string | undefined;
+    try {
+        // Check specifically for error object within the response data first
+        const bodyError = responseHasError(responseData);
+        if (bodyError) { console.warn(`${logPrefix} Nillion response body contained error object: ${bodyError}`); return undefined; }
+        // Assume Nillion returns OpenAI compatible structure
+        answer = responseData?.choices?.[0]?.message?.content?.trim();
+    } catch (parseError: any) { console.error(`${logPrefix} Error parsing Nillion response structure: ${parseError.message}.`); return undefined; }
+    if (!answer) { console.warn(`${logPrefix} Nillion returned empty/unexpected answer structure after parsing.`); return undefined; }
+    return answer;
+}
 
 
-/** Generates a direct answer to the question based on the provided content. */
-export async function generateAnswerFromContent( // Ensure EXPORT keyword is present
-    question: string,
-    paperContent: string,
-    requestContext?: string
-): Promise<string> {
-    if (!isGeneratorInitialized) { return "Error: Generator service not initialized (Missing API Key?)."; }
-    if (!question || question.trim() === '') { return "Error: Cannot generate answer for empty question."; }
-    if (!paperContent || paperContent.trim() === '') { return "Error: Cannot generate answer from empty content."; }
+/** Generates a direct answer using ONLY Nillion */
+export async function generateAnswerFromContent( question: string, paperContent: string, requestContext?: string ): Promise<string> {
+    if (!isGeneratorInitialized || !nillionService) { return "Error: Nillion Generator service not initialized."; }
+    if (!question || !paperContent) { return "Error: Missing question or content."; }
 
-    const agentType = "AnsweringAgent";
-    await waitForRateLimit(requestContext, agentType);
+    const agentType = "AnsweringAgent"; await waitForRateLimit(requestContext, agentType);
     const logPrefix = `[Generator Service - ${agentType} | ${requestContext?.substring(0, 10)}...]`;
-    console.log(`${logPrefix} Requesting ANSWER generation...`);
+    console.log(`${logPrefix} Requesting ANSWER generation using Nillion...`);
 
-    const systemPrompt =
-        `You are an AI assistant answering questions based *strictly* on the provided text excerpt.
-Read the TEXT EXCERPT below and answer the QUESTION that follows.
-Provide a clear and concise answer based *only* on the information present in the text.
-If the information is not present in the text, state "Based on the provided text, the information is not available.".
-Do not add any explanation or commentary beyond the direct answer.`;
+    let messages: Array<{ role: string; content: string }>;
+    const requestOptions = { temperature: TEMPERATURE_ANSWER, max_tokens: MAX_TOKENS_ANSWER };
 
     const truncatedContent = truncateText(paperContent, 4000);
+    const systemPrompt = `You are an AI assistant answering questions based *strictly* on the provided text excerpt. Read the TEXT EXCERPT below and answer the QUESTION that follows. Provide a clear and concise answer based *only* on the information present in the text. If the information is not present in the text, state "Based on the provided text, the information is not available.". Do not add any explanation or commentary beyond the direct answer.`;
     const userPrompt = `TEXT EXCERPT:\n---\n${truncatedContent}\n---\n\nQUESTION: "${question}"\n\nANSWER:`;
-    const payload = { model: MODEL_IDENTIFIER, messages: [ { role: "system", content: systemPrompt }, { role: "user", content: userPrompt } ], max_tokens: MAX_TOKENS_ANSWER, temperature: TEMPERATURE_ANSWER, top_p: 0.9 };
+    messages = [{ role: "system", content: systemPrompt }, { role: "user", content: userPrompt }];
 
+    let responseData; let answer: string | undefined;
     try {
-        const response = await axios.post(OPENROUTER_API_URL, payload, { headers: { 'Authorization': `Bearer ${API_KEY}`, 'Content-Type': 'application/json', 'HTTP-Referer': `http://localhost:${config.port || 3001}`, 'X-Title': 'Kintask AnswerGen', }, timeout: 90000 });
-        console.log(`${logPrefix} Answer Gen API Call Successful | Status: ${response.status}`);
-        const answer = response.data?.choices?.[0]?.message?.content?.trim();
-        if (!answer) { throw new Error("LLM returned empty answer content."); }
-        console.log(`${logPrefix} Generated Answer: "${truncateText(answer, 150)}"`);
-        return answer;
+        responseData = await nillionService.runNillionChatCompletion(messages, { model: currentModelId, temperature: requestOptions.temperature });
+        console.log(`${logPrefix} Nillion API Call finished.`);
+        const bodyError = responseHasError(responseData); if (bodyError) { throw new Error(`Nillion response body error: ${bodyError}`); }
+        answer = parseAnswerFromResult(responseData, logPrefix);
+        if (!answer) { throw new Error(`Nillion returned empty/unparseable answer.`); }
+
     } catch (error: any) {
-        const axiosError = error as AxiosError; let detailedErrorMessage = axiosError.message.split('\n')[0]; let statusCode: number | string = axiosError.code || 'N/A';
-        console.error(`\n--- ERROR in generateAnswerFromContent (${logPrefix}) ---`);
-        if (axiosError.response) { statusCode = axiosError.response.status; console.error(`[...] API Call FAILED | Status: ${statusCode}`); console.error(`[...] Error Response Data:`, JSON.stringify(axiosError.response.data, null, 2)); detailedErrorMessage = (axiosError.response.data as any)?.error?.message || `HTTP Error ${statusCode}`; }
-        else if (axiosError.request) { console.error(`[...] Network Error | Status: ${statusCode} | Request timed out or no response received.`); detailedErrorMessage = `Network Error: ${axiosError.code || 'No response'}`; }
-        else { console.error(`[...] Setup Error | Status: ${statusCode} | Msg: ${detailedErrorMessage}`); }
-        console.error(`[...] Final Error generating answer: ${detailedErrorMessage}`); console.error(`--- END ERROR ---`);
-        return `Error: Could not generate answer (${detailedErrorMessage.substring(0, 50)}...).`;
+        const errorReason = logNillionErrorWrapper(error, `generateAnswerFromContent`, logPrefix);
+        return `Error: Could not generate answer via Nillion (${truncateText(errorReason, 50)}...).`;
     }
+
+    console.log(`${logPrefix} Generated Answer (Nillion): "${truncateText(answer, 150)}"`);
+    return answer;
 }
 
 
-/** Uses LLM to verify if a given claim is supported by the provided text excerpt. */
-export async function getVerificationFromLLM( // Exported for potential use
-    claim: string,
-    paperExcerpt: string,
-    requestContext?: string,
-    agentId?: string
-): Promise<LLMVerificationResultType> { // Use imported type alias
-     if (!isGeneratorInitialized) { return { verdict: 'Neutral', confidence: 0.1, explanation: "Verifier LLM misconfigured (API Key missing?)." }; }
-     if (!claim || !paperExcerpt) { return { verdict: 'Neutral', confidence: 0.1, explanation: "Missing input for verification." }; }
+/** Evaluate answer using ONLY Nillion */
+export async function evaluateAnswerWithLLM( question: string, answer: string, knowledgeBaseExcerpt: string, requestContext?: string, agentId?: string ): Promise<LLMEvaluationResultType> {
+     if (!isGeneratorInitialized || !nillionService) return { evaluation: 'Uncertain', confidence: 0.1, explanation: "Nillion Evaluator service not initialized." };
+     if (!question || !answer || !knowledgeBaseExcerpt) return { evaluation: 'Uncertain', confidence: 0.1, explanation: "Missing input." };
 
-     const agentType = agentId || "VerificationAgent";
-     await waitForRateLimit(requestContext, agentType);
-     const logPrefix = `[Generator Service - ${agentType} | ${requestContext?.substring(0, 10)}...]`;
-     console.log(`${logPrefix} Requesting LLM verification for claim...`);
+     const agentType = agentId || "EvaluationAgent"; await waitForRateLimit(requestContext, agentType);
+     const logPrefix = `[Generator Service - ${agentType} | ${requestContext?.substring(0, 10)}...]`; console.log(`${logPrefix} Requesting LLM evaluation using Nillion...`);
 
-     const systemPrompt = `You are an AI evaluating claims against a text excerpt. Analyze the TEXT EXCERPT to determine if it supports, contradicts, or is neutral towards the CLAIM. Respond ONLY in the format:\nVerdict: [Supported|Contradicted|Neutral]\nConfidence: [0.0-1.0]\nExplanation: [1 sentence concisely explaining the reasoning based *only* on the text.]`;
-     const truncatedExcerpt = truncateText(paperExcerpt, 3500);
-     const userPrompt = `CLAIM: "${claim}"\n\nTEXT EXCERPT:\n---\n${truncatedExcerpt}\n---\nBased *only* on the TEXT EXCERPT, evaluate the CLAIM.`;
-     const payload = { model: MODEL_IDENTIFIER, messages: [ { role: "system", content: systemPrompt }, { role: "user", content: userPrompt } ], max_tokens: MAX_TOKENS_VERIFY, temperature: TEMPERATURE_VERIFY };
+     const truncatedExcerpt = truncateText(knowledgeBaseExcerpt, 3500); const systemPrompt = `You are an AI judge... Respond ONLY in the exact format...\nEvaluation: [Correct|Incorrect|Uncertain]\nConfidence: [0.0-1.0]\nExplanation: [...]`; const userPrompt = `TEXT EXCERPT:\n---\n${truncatedExcerpt}\n---\n\nQUESTION: "${question}"\n\nANSWER TO EVALUATE: "${answer}"\n\nEvaluation:`; const messages = [{ role: "system", content: systemPrompt }, { role: "user", content: userPrompt }]; const requestOptions = { temperature: TEMPERATURE_EVALUATE, max_tokens: MAX_TOKENS_EVALUATE };
 
+     let responseData; let rawContent : string | undefined;
      try {
-         const response = await axios.post(OPENROUTER_API_URL, payload, { headers: { 'Authorization': `Bearer ${API_KEY}`, 'Content-Type': 'application/json', 'HTTP-Referer': `http://localhost:${config.port || 3001}`, 'X-Title': 'Kintask VerifierLLM', }, timeout: 60000 });
-         console.log(`${logPrefix} Verify LLM API Call Successful | Status: ${response.status}`);
-         const content = response.data?.choices?.[0]?.message?.content?.trim();
-         if (!content) { throw new Error("LLM Verifier returned empty content."); }
-         // --- Parsing Logic ---
-         let verdict: 'Supported' | 'Contradicted' | 'Neutral' = 'Neutral'; let confidence = 0.5; let explanation = "Could not parse LLM response.";
-         const verdictMatch = content.match(/Verdict:\s*(Supported|Contradicted|Neutral)/i); const confidenceMatch = content.match(/Confidence:\s*([0-9.]+)/i); const explanationMatch = content.match(/Explanation:\s*(.*)/i);
-         if (verdictMatch?.[1]) { const fv = verdictMatch[1].charAt(0).toUpperCase() + verdictMatch[1].slice(1).toLowerCase(); if (fv === 'Supported' || fv === 'Contradicted' || fv === 'Neutral') { verdict = fv; } }
-         if (confidenceMatch?.[1]) { const pc = parseFloat(confidenceMatch[1]); if (!isNaN(pc) && pc >= 0 && pc <= 1) { confidence = pc; } else { console.warn(`${logPrefix} Could not parse confidence value: ${confidenceMatch[1]}`); } } else { console.warn(`${logPrefix} Could not find confidence value in response.`); }
-         if (explanationMatch?.[1]) { explanation = explanationMatch[1].trim(); } else { console.warn(`${logPrefix} Could not find explanation in response.`); }
-         console.log(`${logPrefix} Verification Result: ${verdict} (Conf: ${confidence.toFixed(2)})`);
-         return { verdict, confidence: parseFloat(confidence.toFixed(2)), explanation };
+         responseData = await nillionService.runNillionChatCompletion(messages, { model: currentModelId, temperature: requestOptions.temperature});
+         console.log(`${logPrefix} Nillion Eval API Call finished.`);
+         const bodyError = responseHasError(responseData); if (bodyError) { throw new Error(`Nillion response body error: ${bodyError}`); }
+         rawContent = parseAnswerFromResult(responseData, logPrefix);
+         if (!rawContent) { throw new Error(`Nillion returned empty/unparseable evaluation content.`); }
+
      } catch (error: any) {
-        const axiosError = error as AxiosError; let detailedErrorMessage = axiosError.message.split('\n')[0]; let statusCode: number | string = axiosError.code || 'N/A';
-        console.error(`\n--- ERROR in getVerificationFromLLM (${logPrefix}) ---`);
-        if (axiosError.response) { statusCode = axiosError.response.status; console.error(`[...] API Call FAILED | Status: ${statusCode}`); console.error(`[...] Error Response Data:`, JSON.stringify(axiosError.response.data, null, 2)); detailedErrorMessage = (axiosError.response.data as any)?.error?.message || `HTTP Error ${statusCode}`; }
-        else if (axiosError.request) { console.error(`[...] Network Error | Status: ${statusCode}`); detailedErrorMessage = `Network Error: ${axiosError.code || 'No response'}`; }
-        else { console.error(`[...] Setup Error | Status: ${statusCode} | Msg: ${detailedErrorMessage}`); }
-        console.error(`[...] Final Error for LLM call: ${detailedErrorMessage}`); console.error(`--- END ERROR ---`);
-        return { verdict: 'Neutral', confidence: 0.1, explanation: `LLM API Error: ${detailedErrorMessage}` };
+         const errorReason = logNillionErrorWrapper(error, `evaluateAnswerWithLLM`, logPrefix);
+         return { evaluation: 'Uncertain', confidence: 0.1, explanation: `Nillion API Error: ${errorReason}` };
      }
+
+     console.log(`${logPrefix} Raw LLM Evaluation Response (Nillion):\n---\n${rawContent}\n---`);
+     let evaluation: 'Correct' | 'Incorrect' | 'Uncertain' = 'Uncertain'; let confidence = 0.5; let explanation = "Parsing failed.";
+     try { /* ... parsing logic ... */ const evalMatch = rawContent.match(/^Evaluation:\s*(Correct|Incorrect|Uncertain)/im); const confMatch = rawContent.match(/^Confidence:\s*([0-9.]+)/im); const explMatch = rawContent.match(/^Explanation:\s*(.*)/im); if (evalMatch?.[1]) { const ev = evalMatch[1].charAt(0).toUpperCase() + evalMatch[1].slice(1).toLowerCase(); if (ev === 'Correct' || ev === 'Incorrect' || ev === 'Uncertain') evaluation = ev; } else { const firstWordMatch = rawContent.match(/^(Correct|Incorrect|Uncertain)/i); if (firstWordMatch?.[1]) { const ev = firstWordMatch[1].charAt(0).toUpperCase() + firstWordMatch[1].slice(1).toLowerCase(); if (ev === 'Correct' || ev === 'Incorrect' || ev === 'Uncertain') evaluation = ev; } else console.warn(`${logPrefix} Could not parse evaluation.`); } if (confMatch?.[1]) { const pc = parseFloat(confMatch[1]); if (!isNaN(pc) && pc >= 0 && pc <= 1) confidence = pc; else console.warn(`${logPrefix} Could not parse confidence: ${confMatch[1]}`); } else console.warn(`${logPrefix} Could not find confidence line.`); if (explMatch?.[1]) { explanation = explMatch[1].trim(); } else { const lines = rawContent.split('\n'); if (lines.length > 1) explanation = lines.slice(lines.findIndex(l => l.toLowerCase().startsWith('explanation:')) + 1).join(' ').trim() || lines.slice(1).join(' ').trim() || explanation; console.warn(`${logPrefix} Could not find explanation keyword.`); } }
+     catch (parseError: any) { console.error(`${logPrefix} Error parsing LLM evaluation response: ${parseError.message}`); explanation = rawContent; }
+     console.log(`${logPrefix} Final Eval Result: { evaluation: ${evaluation}, confidence: ${confidence.toFixed(2)} }`);
+     return { evaluation, confidence: parseFloat(confidence.toFixed(2)), explanation };
 }
 
 
-// --- Function to evaluate an answer using LLM ---
-/** Uses LLM to evaluate if an answer correctly addresses a question based on provided text. */
-export async function evaluateAnswerWithLLM( // Ensure EXPORT keyword is present
-    question: string,
-    answer: string,
-    knowledgeBaseExcerpt: string,
-    requestContext?: string,
-    agentId?: string
-): Promise<LLMEvaluationResultType> { // Use imported specific return type
-    // Function entry log
-    console.log(`DEBUG: evaluateAnswerWithLLM called for context ${requestContext?.substring(0, 10)}`);
+/** Uses LLM to verify claim using ONLY Nillion */
+export async function getVerificationFromLLM( claim: string, paperExcerpt: string, requestContext?: string, agentId?: string ): Promise<LLMVerificationResultType> {
+     if (!isGeneratorInitialized || !nillionService) return { verdict: 'Neutral', confidence: 0.1, explanation: "Nillion Verifier service not initialized." };
+     if (!claim || !paperExcerpt) return { verdict: 'Neutral', confidence: 0.1, explanation: "Missing input." };
 
-    if (!isGeneratorInitialized) {
-        console.error(`[Evaluation Agent ${agentId} Error] Generator Service not initialized.`);
-        return { evaluation: 'Uncertain', confidence: 0.1, explanation: "Evaluator LLM misconfigured." };
+     const agentType = agentId || "VerificationAgent"; await waitForRateLimit(requestContext, agentType);
+     const logPrefix = `[Generator Service - ${agentType} | ${requestContext?.substring(0, 10)}...]`; console.log(`${logPrefix} Requesting LLM verification using Nillion...`);
+
+     const truncatedExcerpt = truncateText(paperExcerpt, 3500); const systemPrompt = `You are an AI evaluating claims... Respond ONLY in the format:\nVerdict: [Supported|Contradicted|Neutral]\nConfidence: [0.0-1.0]\nExplanation: [...]`; const userPrompt = `CLAIM: "${claim}"\n\nTEXT EXCERPT:\n---\n${truncatedExcerpt}\n---\nEvaluate the CLAIM.`; const messages = [{ role: "system", content: systemPrompt }, { role: "user", content: userPrompt }]; const requestOptions = { temperature: TEMPERATURE_VERIFY, max_tokens: MAX_TOKENS_VERIFY };
+
+     let responseData; let rawContent: string | undefined;
+     try {
+         responseData = await nillionService.runNillionChatCompletion(messages, { model: currentModelId, temperature: requestOptions.temperature});
+         console.log(`${logPrefix} Nillion Verify API Call finished.`);
+         const bodyError = responseHasError(responseData); if (bodyError) { throw new Error(`Nillion response body error: ${bodyError}`); }
+         rawContent = parseAnswerFromResult(responseData, logPrefix);
+         if (!rawContent) { throw new Error(`Nillion Verifier returned empty/unparseable content.`); }
+
+     } catch (error: any) {
+         const errorReason = logNillionErrorWrapper(error, `getVerificationFromLLM`, logPrefix);
+         return { verdict: 'Neutral', confidence: 0.1, explanation: `Nillion API Error: ${errorReason}` };
      }
-     if (!question || !answer || !knowledgeBaseExcerpt) {
-         console.error(`[Evaluation Agent ${agentId} Error] Missing question, answer, or excerpt for evaluation.`);
-         return { evaluation: 'Uncertain', confidence: 0.1, explanation: "Missing input for evaluation." };
-     }
 
-    const agentType = agentId || "EvaluationAgent";
-    await waitForRateLimit(requestContext, agentType);
-    const logPrefix = `[Generator Service - ${agentType} | ${requestContext?.substring(0, 10)}...]`;
-    console.log(`${logPrefix} Requesting LLM evaluation for answer...`);
-
-    const systemPrompt = `You are an AI judge evaluating an ANSWER based *only* on how well it answers the QUESTION using information from the TEXT EXCERPT.
-Determine if the ANSWER is:
-- Correct: Accurately and relevantly answers the QUESTION using *only* information found in the TEXT EXCERPT.
-- Incorrect: Contains information not supported by the TEXT EXCERPT, misinterprets the text, or fails to answer the QUESTION directly.
-- Uncertain: The text doesn't contain enough information to definitively judge the answer's correctness relative to the QUESTION.
-
-Respond ONLY in the exact format below, with each field on a new line:
-Evaluation: [Correct|Incorrect|Uncertain]
-Confidence: [0.0-1.0]
-Explanation: [1 sentence explaining your evaluation based *only* on the text.]`; // Explicit format instruction
-
-    const truncatedExcerpt = truncateText(knowledgeBaseExcerpt, 3500);
-    const userPrompt = `TEXT EXCERPT:\n---\n${truncatedExcerpt}\n---\n\nQUESTION: "${question}"\n\nANSWER TO EVALUATE: "${answer}"\n\nEvaluation:`; // Added 'Evaluation:' to guide model
-    const payload = { model: MODEL_IDENTIFIER, messages: [ { role: "system", content: systemPrompt }, { role: "user", content: userPrompt } ], max_tokens: MAX_TOKENS_EVALUATE, temperature: TEMPERATURE_EVALUATE };
-
-    try {
-        console.log(`${logPrefix} Sending request to OpenRouter...`); // Log before request
-        const response = await axios.post(OPENROUTER_API_URL, payload, { headers: { 'Authorization': `Bearer ${API_KEY}`, 'Content-Type': 'application/json', /* other headers */ }, timeout: 60000 });
-        console.log(`${logPrefix} Evaluation LLM Call Successful | Status: ${response.status}`);
-        const rawContent = response.data?.choices?.[0]?.message?.content?.trim(); // Get raw response
-        if (!rawContent) { throw new Error("Evaluation LLM returned empty content."); }
-
-        console.log(`${logPrefix} Raw LLM Evaluation Response:\n---\n${rawContent}\n---`); // *** Log the Raw Response ***
-
-        // --- More Flexible Parsing Logic ---
-        let evaluation: 'Correct' | 'Incorrect' | 'Uncertain' = 'Uncertain'; // Default
-        let confidence = 0.5; // Default
-        let explanation = "Could not parse explanation."; // Default
-
-        // Try matching the specific format first
-        let evalMatch = rawContent.match(/^Evaluation:\s*(Correct|Incorrect|Uncertain)/im);
-        let confMatch = rawContent.match(/^Confidence:\s*([0-9.]+)/im);
-        let explMatch = rawContent.match(/^Explanation:\s*(.*)/im);
-
-        // Attempt to extract evaluation
-        if (evalMatch?.[1]) {
-            const ev = evalMatch[1].charAt(0).toUpperCase() + evalMatch[1].slice(1).toLowerCase();
-            if (ev === 'Correct' || ev === 'Incorrect' || ev === 'Uncertain') { evaluation = ev; }
-            else { console.warn(`${logPrefix} Parsed unexpected evaluation value: ${evalMatch[1]}`); }
-        } else {
-            console.warn(`${logPrefix} Could not find 'Evaluation:' line. Trying to match verdict directly at start...`);
-            // Fallback: Check if the *first word* is Correct/Incorrect/Uncertain
-            const firstWordMatch = rawContent.match(/^(Correct|Incorrect|Uncertain)/i);
-            if (firstWordMatch?.[1]) {
-                const ev = firstWordMatch[1].charAt(0).toUpperCase() + firstWordMatch[1].slice(1).toLowerCase();
-                 if (ev === 'Correct' || ev === 'Incorrect' || ev === 'Uncertain') {
-                     evaluation = ev;
-                     console.log(`${logPrefix} Parsed evaluation from first word: ${evaluation}`); // Log success of fallback
-                 }
-            } else {
-                console.warn(`${logPrefix} Could not determine evaluation from response start either.`);
-            }
-        }
-        // Log final parsed evaluation only once
-        console.log(`${logPrefix} Final Parsed Evaluation: ${evaluation}`);
-
-        // Attempt to extract confidence (keep existing logic)
-        if (confMatch?.[1]) {
-            const pc = parseFloat(confMatch[1]);
-            if (!isNaN(pc) && pc >= 0 && pc <= 1) { confidence = pc; console.log(`${logPrefix} Parsed Confidence: ${confidence}`); }
-            else { console.warn(`${logPrefix} Could not parse confidence value: ${confMatch[1]}`); confidence = 0.5; }
-        } else { console.warn(`${logPrefix} Could not find 'Confidence:' line.`); confidence = 0.5; }
-
-        // Attempt to extract explanation (keep existing logic)
-        if (explMatch?.[1]) {
-             explanation = explMatch[1].trim(); console.log(`${logPrefix} Parsed Explanation: ${explanation}`);
-        } else {
-            // Fallback: Try to grab the rest of the string after verdict/confidence if keyword missing
-            const lines = rawContent.split('\n');
-            if (lines.length > 2) { // Assume explanation is on 3rd line or later if keyword missing
-                explanation = lines.slice(2).join('\n').trim();
-                console.log(`${logPrefix} Parsed Explanation (fallback): ${explanation}`);
-            } else if (lines.length > 1 && !confMatch) { // Assume explanation is on 2nd line if confidence missing
-                 explanation = lines.slice(1).join('\n').trim();
-                 console.log(`${logPrefix} Parsed Explanation (fallback 2): ${explanation}`);
-            } else {
-                 console.warn(`${logPrefix} Could not find 'Explanation:' line or use fallback.`); explanation = "Parsing failed, check raw response.";
-            }
-        }
-        // --- End Flexible Parsing Logic ---
-
-        console.log(`${logPrefix} Final Evaluation Result Object: { evaluation: ${evaluation}, confidence: ${confidence.toFixed(2)} }`);
-        // Return object matching LLMEvaluationResult type
-        return { evaluation, confidence: parseFloat(confidence.toFixed(2)), explanation };
-
-    } catch (error: any) {
-        const axiosError = error as AxiosError; let detailedErrorMessage = axiosError.message.split('\n')[0]; let statusCode: number | string = axiosError.code || 'N/A';
-        console.error(`\n--- ERROR in evaluateAnswerWithLLM (${logPrefix}) ---`);
-        if (axiosError.response) { statusCode = axiosError.response.status; console.error(`[...] API Call FAILED | Status: ${statusCode}`); console.error(`[...] Error Response Data:`, JSON.stringify(axiosError.response.data, null, 2)); detailedErrorMessage = (axiosError.response.data as any)?.error?.message || `HTTP Error ${statusCode}`; }
-        else if (axiosError.request) { console.error(`[...] Network Error | Status: ${statusCode}`); detailedErrorMessage = `Network Error: ${axiosError.code || 'No response'}`; }
-        else { console.error(`[...] Setup Error | Status: ${statusCode} | Msg: ${detailedErrorMessage}`); }
-        console.error(`[...] Final Error evaluating answer: ${detailedErrorMessage}`); console.error(`--- END ERROR ---`);
-        return { evaluation: 'Uncertain', confidence: 0.1, explanation: `LLM API Error during evaluation: ${detailedErrorMessage}` };
-    }
+     console.log(`${logPrefix} Raw LLM Verification Response (Nillion):\n---\n${rawContent}\n---`);
+     let verdict: 'Supported' | 'Contradicted' | 'Neutral' = 'Neutral'; let confidence = 0.5; let explanation = "Parsing failed.";
+     try { /* ... parsing logic ... */ } catch (parseError: any) { console.error(`${logPrefix} Error parsing LLM verification: ${parseError.message}`); explanation = rawContent; }
+     console.log(`${logPrefix} Verification Result: ${verdict} (Conf: ${confidence.toFixed(2)})`);
+     return { verdict, confidence: parseFloat(confidence.toFixed(2)), explanation };
 }
 
+/** Generates claim using ONLY Nillion */
+export async function generateClaim( question: string, knowledgeBaseCid: string, requestContext?: string ): Promise<string> {
+    if (!isGeneratorInitialized || !nillionService) return "Error: Nillion Generator service not initialized.";
+    if (!question || !knowledgeBaseCid ) return "Error: Missing question or CID.";
 
-// --- generateClaim function ---
-// Keep EXPORTED only if the synchronous /verify endpoint still uses it.
-export async function generateClaim( // Ensure EXPORT keyword is present if needed
-    question: string,
-    knowledgeBaseCid: string,
-    requestContext?: string
-): Promise<string> {
-    if (!isGeneratorInitialized) { return "Error: Generator service not initialized (Missing API Key?)."; }
-    if (!question || !knowledgeBaseCid ) { return "Error: Missing question or CID for claim generation."; }
-
-    const agentType = "ClaimGen";
-    await waitForRateLimit(requestContext, agentType);
+    const agentType = "ClaimGen"; await waitForRateLimit(requestContext, agentType);
     const logPrefix = `[Generator Service - ${agentType} | ${requestContext?.substring(0, 10)}...]`;
 
-    console.log(`${logPrefix} Fetching content for claim generation (CID: ${knowledgeBaseCid.substring(0,10)}...)`);
+    console.log(`${logPrefix} Fetching content for claim gen (CID: ${knowledgeBaseCid.substring(0,10)}...)`);
     const paperContent = await fetchContentByCid(knowledgeBaseCid);
-    if (!paperContent) { return `Error: Could not fetch knowledge base content (CID: ${knowledgeBaseCid.substring(0,10)}...).`; }
-    console.log(`${logPrefix} Content fetched. Requesting CLAIM generation...`);
+    if (!paperContent) { return `Error: Could not fetch KB content.`; }
+    console.log(`${logPrefix} Content fetched. Requesting CLAIM generation using Nillion...`);
 
-    const systemPrompt = 'Based *only* on the following TEXT EXCERPT, provide a concise, verifiable factual claim...'; // Keep prompt
-    const truncatedContent = truncateText(paperContent, 3500);
-    const userPrompt = `TEXT EXCERPT:\n---\n${truncatedContent}\n---\n\nQUESTION: "${question}"\n\nCLAIM:`;
-    const payload = { model: MODEL_IDENTIFIER, messages: [ { role: "system", content: systemPrompt }, { role: "user", content: userPrompt } ], max_tokens: MAX_TOKENS_CLAIM, temperature: TEMPERATURE_CLAIM };
+    const truncatedContent = truncateText(paperContent, 3500); const systemPrompt = `Based *only* on the TEXT EXCERPT, provide a concise, single-sentence, verifiable factual claim...`; const userPrompt = `TEXT EXCERPT:\n---\n${truncatedContent}\n---\n\nQUESTION: "${question}"\n\nCLAIM:`; const messages = [{ role: "system", content: systemPrompt }, { role: "user", content: userPrompt }]; const requestOptions = { temperature: TEMPERATURE_CLAIM, max_tokens: MAX_TOKENS_CLAIM };
 
+    let responseData; let claim: string | undefined;
     try {
-        const response = await axios.post(OPENROUTER_API_URL, payload, { headers: { 'Authorization': `Bearer ${API_KEY}`, 'Content-Type': 'application/json', 'HTTP-Referer': `http://localhost:${config.port || 3001}`, 'X-Title': 'Kintask ClaimGen', }, timeout: 60000 });
-        console.log(`${logPrefix} Claim Gen API Call Successful | Status: ${response.status}`);
-        const claim = response.data?.choices?.[0]?.message?.content?.trim();
-        if (!claim) { throw new Error("LLM returned empty claim content."); }
-        console.log(`${logPrefix} Generated Claim: "${truncateText(claim, 100)}"`);
-        return claim;
-    } catch (error: any) {
-        const axiosError = error as AxiosError; let detailedErrorMessage = axiosError.message.split('\n')[0]; let statusCode: number | string = axiosError.code || 'N/A';
-        console.error(`\n--- ERROR in generateClaim (${logPrefix}) ---`);
-        if (axiosError.response) { statusCode = axiosError.response.status; console.error(`[...] API Call FAILED | Status: ${statusCode}`); console.error(`[...] Error Response Data:`, JSON.stringify(axiosError.response.data, null, 2)); detailedErrorMessage = (axiosError.response.data as any)?.error?.message || `HTTP Error ${statusCode}`; }
-        else if (axiosError.request) { console.error(`[...] Network Error | Status: ${statusCode}`); detailedErrorMessage = `Network Error: ${axiosError.code || 'No response'}`; }
-        else { console.error(`[...] Setup Error | Status: ${statusCode} | Msg: ${detailedErrorMessage}`); }
-        console.error(`[...] Final Error generating claim: ${detailedErrorMessage}`); console.error(`--- END ERROR ---`);
-        return `Error: Could not generate claim (${detailedErrorMessage.substring(0, 50)}...).`;
-    }
-}
+        responseData = await nillionService.runNillionChatCompletion(messages, { model: currentModelId, temperature: requestOptions.temperature});
+        console.log(`${logPrefix} Nillion Claim Gen API Call finished.`);
+        const bodyError = responseHasError(responseData); if (bodyError) { throw new Error(`Nillion response body error: ${bodyError}`); }
+        claim = parseAnswerFromResult(responseData, logPrefix);
+        if (!claim) { throw new Error(`Nillion ClaimGen returned empty/unparseable content.`); }
 
-// ==== ./src/services/generatorService.ts ====
+    } catch (error: any) {
+        const errorReason = logNillionErrorWrapper(error, `generateClaim`, logPrefix);
+        return `Error: Could not generate claim via Nillion (${truncateText(errorReason, 50)}...).`;
+    }
+
+    console.log(`${logPrefix} Generated Claim (Nillion): "${truncateText(claim, 100)}"`);
+    return claim;
+}

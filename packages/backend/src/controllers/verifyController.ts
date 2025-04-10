@@ -3,7 +3,7 @@ import { Request, Response, NextFunction } from 'express';
 // Ensure correct import paths relative to this file
 import { generateClaim } from '../services/generatorService'; // Assuming src/services/generatorService.ts
 import { performVerification } from '../services/verifierService'; // Assuming src/services/verifierService.ts
-import { logErrorEvent } from '../services/recallService'; // Assuming src/services/recallService.ts
+// import { logErrorEvent } from '../services/recallService'; // Assuming src/services/recallService.ts
 import { VerificationResultInternal, ApiVerifyResponse, RecallLogEntryData } from '../types'; // Assuming src/types/index.ts
 import { getL2ExplorerUrl, isValidCid } from '../utils'; // Assuming src/utils/index.ts
 
@@ -81,7 +81,7 @@ export async function handleVerifyRequest(req: Request, res: Response, next: Nex
     console.error(`[Verify Controller Error] Context: ${uniqueRequestContext} | Error: ${conciseError}`);
 
     // Log error using unified service
-    logErrorEvent({ controllerError: conciseError, stage: 'VerifyControllerCatch' }, uniqueRequestContext).catch(/* ignore background log fail */);
+    // logErrorEvent({ controllerError: conciseError, stage: 'VerifyControllerCatch' }, uniqueRequestContext).catch(/* ignore background log fail */);
 
     const finalAnswerInError = (typeof generatedClaim === 'string' && generatedClaim !== "Processing...") ? generatedClaim : "Claim Generation Failed";
     const finalStatusInError = verificationResult?.finalVerdict?.startsWith('Error:')

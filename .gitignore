@@ -33,6 +33,7 @@ lerna-debug.log*
 
 packages/contracts/circuits/ptau
 packages/contracts/ignition/deployments/chain-314159/build-info
+packages/backend/src/contracts/abi
 
 # OS generated files
 .DS_Store
