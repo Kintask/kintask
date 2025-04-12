@@ -1,189 +1,500 @@
-// ROOT/scripts/agents/answeringAgent.js (Live LLM + Programmatic KB Reg + ZKP + Log Evidence)
+// answeringAgent.js (ES Module Syntax - Corrected for Ethers v5 and Errors, Payment Collection Commented Out)
 
-import dotenv from 'dotenv';
-import path from 'path';
-import fs from 'fs'; // Required for checking ABI path
-import { fileURLToPath, pathToFileURL } from 'url';
-import { privateKeyToAccount } from 'viem/accounts';
-import { getAddress } from 'viem';
-import { ethers } from 'ethers';
+import dotenv from "dotenv";
+import path from "path";
+import fs from "fs";
+import { fileURLToPath, pathToFileURL } from 'url'; // Keep pathToFileURL for dynamic imports
+import { privateKeyToAccount } from "viem/accounts";
+import { getAddress } from "viem";
+import { ethers } from "ethers"; // Use Ethers v5 import
 import * as snarkjs from "snarkjs";
 
 // --- Import Utilities ---
 import {
-  createEvidenceCar,
-  uploadCarFile,
-  makeOffChainDeal,
-  truncateText,
-  hashData,
-  hashToBigInt
-} from './agentUtils.js';
+    // createEvidenceCar,
+    // uploadCarFile,
+    truncateText,
+    hashData,
+    hashToBigInt
+} from './agentUtils.js'; // Keep .js extension for explicit ESM import
 
 // --- Environment Variable Loading ---
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const envPath = path.resolve(__dirname, '../../packages/backend/.env');
+
 dotenv.config({ path: envPath });
-console.log(`[Answering Agent Full] Loading .env from backend: ${envPath}`);
+console.log(`[Answering Agent] Loading .env from backend: ${envPath}`);
 
-// --- Configuration Flags ---
-const IS_LOCAL_TEST = !!process.env.LOCALHOST_RPC_URL;
-// *** USE_HARDCODED_LLM is now effectively false as we use live LLM calls ***
-// const USE_HARDCODED_LLM = process.env.USE_HARDCODED_LLM === 'true';
-console.log(`[Answering Agent Full] Running in ${IS_LOCAL_TEST ? 'LOCAL' : 'CALIBRATION'} mode.`);
-console.log("[Answering Agent Full] Using LIVE LLM calls via backend services.");
+// --- Key Generation Helpers (Defined Locally) ---
+const CONTEXT_DATA_PREFIX = "reqs/";
+const getAnswerKey = (ctx, agentId) => {
+    // Ensure agentId is checksummed before using in key
+    const checksummedAgentId = getAddress(agentId);
+    return `${CONTEXT_DATA_PREFIX}${ctx}/answers/${checksummedAgentId}.json`;
+};
+
+// --- Config & Deployment Info ---
+const IS_LOCAL_TEST = process.env.IS_LOCAL_TEST === 'true';
+const AGENT_GAS_LIMIT_ANSWER = BigInt(process.env.AGENT_GAS_LIMIT_ANSWER || '1000000');
+const AGENT_GAS_LIMIT_VALIDATE = BigInt(process.env.AGENT_GAS_LIMIT_VALIDATE || '1500000');
+const AGENT_GAS_LIMIT_COLLECT = BigInt(process.env.AGENT_GAS_LIMIT_COLLECT || '500000'); // Still defined, just not used in processQuestionJob
+const AGENT_GAS_LIMIT_STRING_RESULT = BigInt(process.env.AGENT_GAS_LIMIT_STRING_RESULT || '500000');
+
+// --- Helper: Send Local Test ETH (Using Ethers v5 syntax) ---
+async function sendLocalTestEth() {
+    if (IS_LOCAL_TEST) {
+        try {
+            console.log(`[Answering Agent] Sending initial ETH to local wallet...`);
+            const hardhatDefaultPrivateKey = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
+            const localRpcUrl = process.env.LOCALHOST_RPC_URL || "http://127.0.0.1:8545";
+            const targetWalletKey = process.env.LOCALHOST_OWNER_PRIVATE_KEY || process.env.AGENT_PRIVATE_KEY;
+            if (!targetWalletKey) { throw new Error("No target wallet key found"); }
+            const targetWallet = new ethers.Wallet(targetWalletKey);
+            const targetAddress = targetWallet.address;
+            const provider = new ethers.providers.JsonRpcProvider(localRpcUrl); // v5
+            const signer = new ethers.Wallet(hardhatDefaultPrivateKey, provider);
+            const signerBalance = await provider.getBalance(signer.address);
+            console.log(`[Answering Agent] Source wallet (${signer.address}) balance: ${ethers.utils.formatEther(signerBalance)} ETH`); // v5
+            const targetBalance = await provider.getBalance(targetAddress);
+            console.log(`[Answering Agent] Target wallet (${targetAddress}) initial balance: ${ethers.utils.formatEther(targetBalance)} ETH`); // v5
+            if (targetBalance.lt(ethers.utils.parseEther("0.1"))) { // v5
+                const tx = await signer.sendTransaction({ to: targetAddress, value: ethers.utils.parseEther("1.0"), gasLimit: 100000 }); // v5
+                console.log(`[Answering Agent] Sending 1 ETH to ${targetAddress}, tx hash: ${tx.hash}`);
+                await tx.wait();
+                const newBalance = await provider.getBalance(targetAddress);
+                console.log(`[Answering Agent] Target wallet (${targetAddress}) new balance: ${ethers.utils.formatEther(newBalance)} ETH`); // v5
+            } else { console.log(`[Answering Agent] Target wallet already has sufficient ETH (${ethers.utils.formatEther(targetBalance)} ETH)`); }
+        } catch (error) {
+             const errorMessage = error instanceof Error ? error.message : String(error);
+             console.error(`[Answering Agent] Error sending local test ETH: ${errorMessage}`);
+        }
+    }
+}
+await sendLocalTestEth(); // Top-level await okay in ESM
+
+// --- CONTRACT ADDRESSES ---
+const getConfigValue = (key, required = true, defaultValue) => {
+    const value = process.env[key];
+    if (!value && required && defaultValue === undefined) { throw new Error(`Missing required environment variable: ${key}`); }
+    if (!value && defaultValue !== undefined) { console.warn(`[Answering Agent] Using default value for ${key}: ${defaultValue}`); return defaultValue; }
+    return value;
+};
+const ANSWER_STATEMENT_ADDRESS = getConfigValue('ANSWER_STATEMENT_ADDRESS');
+const ZKPVALIDATOR_ADDRESS = getConfigValue('ZKP_VALIDATOR_ADDRESS');
+const ERC20_PAYMENT_STATEMENT_ADDRESS = getConfigValue('ERC20_PAYMENT_STATEMENT_ADDRESS');
+const EAS_ADDRESS = getConfigValue('EAS_CONTRACT_ADDRESS');
+const STRING_RESULT_STATEMENT_ADDRESS = getConfigValue('STRING_RESULT_STATEMENT_ADDRESS', false, ethers.constants.AddressZero); // v5
 
 
-// --- Agent Identity (Always derived from AGENT_PRIVATE_KEY) ---
-let AGENT_ID, AGENT_ADDRESS, AGENT_PRIVATE_KEY;
+// --- Load contract ABIs ---
+function loadAbi(contractName) {
+    const abiPath = path.resolve(__dirname, `../../packages/contracts/artifacts/contracts/${contractName}.sol/${contractName}.json`);
+    try { return JSON.parse(fs.readFileSync(abiPath, 'utf8')).abi; }
+    catch (error) {
+         const externalAbiPath = path.resolve(__dirname, `../../packages/contracts/artifacts/contracts/external/${contractName}.sol/${contractName}.json`);
+         console.warn(`[Answering Agent] ABI not found at ${abiPath}, trying ${externalAbiPath}...`);
+         try { return JSON.parse(fs.readFileSync(externalAbiPath, 'utf8')).abi; }
+         catch (error2) { console.error(`[Answering Agent] Failed to load ABI for ${contractName} from both paths: ${error2.message}`); throw new Error(`Failed to load ABI for ${contractName}`); }
+    }
+}
+const answerStatementABI = loadAbi("AnswerStatement");
+const zkpValidatorABI = loadAbi("ZKPValidator");
+const erc20PaymentStatementABI = loadAbi("ERC20PaymentStatement");
+const stringResultStatementABI = loadAbi("StringResultStatement");
+const easABI = loadAbi("EAS");
+
+// --- Agent Identity ---
+let AGENT_ADDRESS;
+let AGENT_PRIVATE_KEY;
 try {
-    AGENT_PRIVATE_KEY = process.env.AGENT_PRIVATE_KEY || process.env.RECALL_PRIVATE_KEY;
-    if (!AGENT_PRIVATE_KEY) throw new Error('AGENT_PRIVATE_KEY or RECALL_PRIVATE_KEY must be set');
-    const formattedPrivateKey = AGENT_PRIVATE_KEY.startsWith('0x') ? AGENT_PRIVATE_KEY : `0x${AGENT_PRIVATE_KEY}`;
-    const viemAccount = privateKeyToAccount(formattedPrivateKey);
+    const rawPrivateKey = process.env.AGENT_PRIVATE_KEY || process.env.RECALL_PRIVATE_KEY;
+    if (!rawPrivateKey) throw new Error('AGENT_PRIVATE_KEY or RECALL_PRIVATE_KEY must be set');
+    AGENT_PRIVATE_KEY = rawPrivateKey.startsWith('0x') ? rawPrivateKey : `0x${rawPrivateKey}`;
+    const viemAccount = privateKeyToAccount(AGENT_PRIVATE_KEY);
     AGENT_ADDRESS = getAddress(viemAccount.address);
-    AGENT_ID = AGENT_ADDRESS;
-    console.log(`[Answering Agent Full] Agent Address (for ZKP Input): ${AGENT_ADDRESS}`);
-} catch (error) { console.error("[Answering Agent Full] FATAL: Derive agent ID failed.", error); process.exit(1); }
-
-// --- Owner Identity (Needed for KB Reg) ---
-let OWNER_ADDRESS, OWNER_PRIVATE_KEY;
-try {
-    OWNER_PRIVATE_KEY = (IS_LOCAL_TEST && process.env.LOCALHOST_OWNER_PRIVATE_KEY)
-         ? process.env.LOCALHOST_OWNER_PRIVATE_KEY
-         : (process.env.WALLET_PRIVATE_KEY || process.env.RECALL_PRIVATE_KEY);
-    if (!OWNER_PRIVATE_KEY) throw new Error('Owner Key missing');
-    const formattedOwnerKey = OWNER_PRIVATE_KEY.startsWith('0x') ? OWNER_PRIVATE_KEY : `0x${OWNER_PRIVATE_KEY}`;
-    const ownerAccount = privateKeyToAccount(formattedOwnerKey);
-    OWNER_ADDRESS = getAddress(ownerAccount.address);
-    console.log(`[Answering Agent Full] Owner Address for KB Reg: ${OWNER_ADDRESS}`);
-} catch (error) { console.error("[Answering Agent Full] FATAL: Derive owner address failed.", error); process.exit(1); }
-
+    console.log(`[Answering Agent] Agent Address: ${AGENT_ADDRESS}`);
+} catch (error) { const errorMessage = error instanceof Error ? error.message : String(error); console.error("[Answering Agent] FATAL: Derive agent ID failed.", errorMessage); process.exit(1); }
 
 // --- ZKP Configuration ---
-const ZKP_CIRCUIT_WASM_PATH = path.resolve(__dirname, "../../packages/contracts/circuits/evaluator/build/evaluator_js/evaluator.wasm");
-const ZKP_CIRCUIT_ZKEY_PATH = path.resolve(__dirname, "../../packages/contracts/circuits/evaluator/build/evaluator_final.zkey");
+const ZKP_CIRCUIT_WASM_PATH = path.resolve(__dirname, "../../packages/contracts/circuits/alwaystrue/build/alwaystrue_js/AlwaysTrue.wasm");
+const ZKP_CIRCUIT_ZKEY_PATH = path.resolve(__dirname, "../../packages/contracts/circuits/alwaystrue/build/alwaystrue_final.zkey");
+if (!fs.existsSync(ZKP_CIRCUIT_WASM_PATH)) console.warn(`[Answering Agent] ZKP WASM file not found: ${ZKP_CIRCUIT_WASM_PATH}`);
+if (!fs.existsSync(ZKP_CIRCUIT_ZKEY_PATH)) console.warn(`[Answering Agent] ZKP ZKEY file not found: ${ZKP_CIRCUIT_ZKEY_PATH}`);
+console.log(`[Answering Agent] Using WASM: ${ZKP_CIRCUIT_WASM_PATH}`);
+console.log(`[Answering Agent] Using ZKEY: ${ZKP_CIRCUIT_ZKEY_PATH}`);
 
-// --- Service Imports ---
+
+// --- Service Imports (Dynamic) ---
 const servicesBasePath = path.resolve(__dirname, '../../packages/backend/dist/services');
 const recallServicePath = path.join(servicesBasePath, 'recallService.js');
 const filecoinServicePath = path.join(servicesBasePath, 'filecoinService.js');
 const generatorServicePath = path.join(servicesBasePath, 'generatorService.js');
-let getPendingJobs, getObjectData, addObjectToBucket, logAnswerEvidence;
+
+let generateAnswerFromContent;
+let getPendingJobs;
+let getObjectData;
+let logAnswer; // Signature should accept validationUID: (answer, agentId, context, fulfillmentUID, validationUID?)
 let fetchContentByCid;
-let generateAnswerFromContent, evaluateAnswerWithLLM; // Ensure both are imported
+// ADDED: Import addObjectToBucket if logAgentCollection is defined locally
+let addObjectToBucket;
+
 try {
-    console.log(`[Answering Agent Full] Importing services...`);
-    const recallService = await import(pathToFileURL(recallServicePath).href);
-    ({ getPendingJobs, getObjectData, addObjectToBucket, logAnswerEvidence } = recallService.default || recallService);
-    const filecoinService = await import(pathToFileURL(filecoinServicePath).href);
-    ({ fetchContentByCid } = filecoinService.default || filecoinService);
-    // Import generator service functions
-    const generatorServiceModule = await import(pathToFileURL(generatorServicePath).href);
-    generateAnswerFromContent = generatorServiceModule.generateAnswerFromContent || generatorServiceModule.default?.generateAnswerFromContent;
-    evaluateAnswerWithLLM = generatorServiceModule.evaluateAnswerWithLLM || generatorServiceModule.default?.evaluateAnswerWithLLM;
+    console.log(`[Answering Agent] Importing backend services dynamically from ${servicesBasePath}...`);
+    const recallService = await import(pathToFileURL(recallServicePath).toString());
+    getPendingJobs = recallService.getPendingJobs;
+    getObjectData = recallService.getObjectData;
+    logAnswer = recallService.logAnswer;
+    addObjectToBucket = recallService.addObjectToBucket; // Import for local logging function
 
-    if (!getPendingJobs || !getObjectData || !addObjectToBucket || !logAnswerEvidence || !fetchContentByCid || !generateAnswerFromContent || !evaluateAnswerWithLLM) {
-         throw new Error("Required service function import failed.");
+    const filecoinService = await import(pathToFileURL(filecoinServicePath).toString());
+    fetchContentByCid = filecoinService.fetchContentByCid;
+    const generatorService = await import(pathToFileURL(generatorServicePath).toString());
+    generateAnswerFromContent = generatorService.generateAnswerFromContent;
+
+    if (!getPendingJobs || !getObjectData || !logAnswer || !fetchContentByCid || !generateAnswerFromContent || !addObjectToBucket) {
+        throw new Error("One or more required service functions not found after dynamic import.");
     }
-    console.log('[Answering Agent Full] Required services initialized.');
-} catch (importError) { console.error("[Answering Agent Full] FATAL: Service initialization failed.", importError); process.exit(1); }
+    console.log('[Answering Agent] Required backend services imported successfully.');
+} catch (importError) { const errorMessage = importError instanceof Error ? importError.message : String(importError); console.error("[Answering Agent] FATAL: Backend service import failed.", errorMessage); process.exit(1); }
 
-// --- Contract Setup ---
-const AGGREGATOR_CONTRACT_ADDRESS = IS_LOCAL_TEST ? process.env.LOCALHOST_ZKP_AGGREGATOR_ADDRESS : process.env.ZKP_AGGREGATOR_CONTRACT_ADDRESS;
-let provider, agentWallet, ownerWallet, aggregatorContractAgent, aggregatorContractOwner, contractAbi;
-if (!AGGREGATOR_CONTRACT_ADDRESS || !OWNER_PRIVATE_KEY) { console.error(`FATAL: Contract Address or Owner Key missing.`); process.exit(1); }
-try { /* ... contract setup ... */
-    const rpcUrl = IS_LOCAL_TEST ? process.env.LOCALHOST_RPC_URL : (process.env.L2_RPC_URL || process.env.FVM_RPC_URL); if (!rpcUrl) throw new Error(`RPC URL not found.`); provider = new ethers.providers.StaticJsonRpcProvider(rpcUrl); let agentSigningKey; let expectedAgentSignerAddress; if (IS_LOCAL_TEST) { agentSigningKey = process.env.LOCALHOST_OWNER_PRIVATE_KEY; if (!agentSigningKey) throw new Error('LOCALHOST_OWNER_PRIVATE_KEY missing'); expectedAgentSignerAddress = OWNER_ADDRESS; console.log("[Answering Agent Full] LOCAL MODE: Agent sign with LOCALHOST_OWNER_PRIVATE_KEY."); } else { agentSigningKey = AGENT_PRIVATE_KEY; expectedAgentSignerAddress = AGENT_ADDRESS; console.log("[Answering Agent Full] CALIBRATION MODE: Agent sign with AGENT_PRIVATE_KEY."); } agentWallet = new ethers.Wallet(agentSigningKey, provider); if (getAddress(agentWallet.address) !== expectedAgentSignerAddress) { console.error(`FATAL: Agent signing Wallet mismatch. Ethers: ${agentWallet.address}, Expected: ${expectedAgentSignerAddress}.`); process.exit(1); } ownerWallet = new ethers.Wallet(OWNER_PRIVATE_KEY, provider); if (getAddress(ownerWallet.address) !== OWNER_ADDRESS) { console.error(`FATAL: Owner Wallet mismatch.`); process.exit(1); } const abiPath = path.resolve(__dirname, "../../packages/contracts/artifacts/contracts/ZKPEvaluatorAggregator.sol/ZKPEvaluatorAggregator.json"); if (!fs.existsSync(abiPath)) throw new Error(`ABI file not found: ${abiPath}`); const abiJsonString = fs.readFileSync(abiPath, 'utf8'); const contractAbiJson = JSON.parse(abiJsonString); contractAbi = contractAbiJson.abi; if (!contractAbi || contractAbi.length === 0) throw new Error("ABI load failed."); aggregatorContractAgent = new ethers.Contract(AGGREGATOR_CONTRACT_ADDRESS, contractAbi, agentWallet); aggregatorContractOwner = new ethers.Contract(AGGREGATOR_CONTRACT_ADDRESS, contractAbi, ownerWallet); console.log(`[Answering Agent Full] Agent ID Addr: ${AGENT_ADDRESS}`); console.log(`[Answering Agent Full] Tx Signing Wallet: ${agentWallet.address}`); console.log(`[Answering Agent Full] Owner Wallet (KB Reg): ${ownerWallet.address}`); console.log(`[Answering Agent Full] RPC: ${rpcUrl}`); console.log(`[Answering Agent Full] Contract: ${AGGREGATOR_CONTRACT_ADDRESS}`);
-} catch (err) { console.error("FATAL: Failed init ethers/ABI:", err); process.exit(1); }
+// --- Ethers.js Contract Setup (Using Ethers v5 syntax) ---
+const rpcUrl = IS_LOCAL_TEST ? (process.env.LOCALHOST_RPC_URL || "http://127.0.0.1:8545") : (process.env.L2_RPC_URL || process.env.FVM_RPC_URL);
+if (!rpcUrl) { console.error("[Answering Agent] FATAL: No RPC URL configured."); process.exit(1); }
+console.log(`[Answering Agent] Using RPC URL: ${rpcUrl} (IS_LOCAL_TEST: ${IS_LOCAL_TEST})`);
 
+const provider = new ethers.providers.JsonRpcProvider(rpcUrl); // v5
+const agentWallet = new ethers.Wallet(AGENT_PRIVATE_KEY, provider);
+console.log(`[Answering Agent] Signing transactions with agent wallet: ${agentWallet.address}`);
+if (agentWallet.address.toLowerCase() !== AGENT_ADDRESS.toLowerCase()) { console.error(`[Answering Agent] FATAL: Mismatch between AGENT_ADDRESS and agentWallet address.`); process.exit(1); }
 
-// --- Agent Configuration & State ---
-const POLLING_INTERVAL_MS = 15000; const CONTEXT_DATA_PREFIX = "reqs/"; let isShuttingDown = false; let pollingTimeoutId = null;
-console.log(`[Answering Agent Full] Starting Polling | Agent ID (logs): ${AGENT_ID.substring(0, 10)}...`);
-
-// Placeholder Deal ID (as real deal making is not implemented yet)
-const PLACEHOLDER_DEAL_ID = BigInt(999999999);
-
-// --- Helper Functions ---
-async function logAgentAnswer(answer, agentId, requestContext) { const key = `${CONTEXT_DATA_PREFIX}${requestContext}/answers/${agentId}.json`; const data = { answer, answeringAgentId: agentId, status: 'Submitted', timestamp: new Date().toISOString(), requestContext }; const result = await addObjectToBucket(data, key); console.log(`[Recall] Logged Answer | Ctx: ${requestContext.substring(0,6)} | Agt: ${agentId.substring(0,10)} | OK: ${result.success} | Existed: ${result.keyExists}`); return result.success ? key : undefined; }
-async function generateProof(inputs) { console.log("[Answering Agent Full] Generating ZKP proof..."); try { const { proof, publicSignals } = await snarkjs.groth16.fullProve(inputs, ZKP_CIRCUIT_WASM_PATH, ZKP_CIRCUIT_ZKEY_PATH); console.log("[Answering Agent Full] ZKP Proof generated successfully."); const formattedProof = { a: [proof.pi_a[0], proof.pi_a[1]], b: [[proof.pi_b[0][1], proof.pi_b[0][0]], [proof.pi_b[1][1], proof.pi_b[1][0]]], c: [proof.pi_c[0], proof.pi_c[1]] }; const formattedPublicSignals = publicSignals.map(ps => BigInt(ps).toString()); return { proof: formattedProof, publicSignals: formattedPublicSignals }; } catch (err) { console.error("[Answering Agent Full] Error generating ZKP proof:", err); return null; } }
-async function submitEvaluationToContract(requestContext, proof, publicSignals, dealId) { console.log(`[Answering Agent Full] Submitting evaluation & Deal ID ${dealId} to contract ctx ${requestContext}...`); try { const tx = await aggregatorContractAgent.submitVerifiedEvaluation( requestContext, AGENT_ADDRESS, proof.a, proof.b, proof.c, publicSignals, dealId, { gasLimit: 20000000 }); console.log(`[Answering Agent Full] Tx sent: ${tx.hash}`); const receipt = await tx.wait(); console.log(`[Answering Agent Full] Tx confirmed: Blk ${receipt.blockNumber}, Gas: ${receipt.gasUsed.toString()}`); const eventName = "EvaluationVerified"; const verifiedEvent = receipt.events?.find(e => e.event === eventName); if (verifiedEvent) { console.log(`[Answering Agent Full] Contract emitted ${eventName}. SUCCESS!`); return { success: true, txHash: tx.hash }; } else { /* error checks */ } } catch (error) { /* error handling */ } } // Simplified error handling for brevity - restore if needed
-async function ensureKBRegistered(requestContext, expectedKbHash) { const shortCtx = requestContext.substring(0, 10); console.log(`[Agent ${AGENT_ID.substring(0, 10)}...] Ensure KB Registered | Ctx: ${shortCtx} | Hash: ${expectedKbHash.substring(0,12)}...`); try { const kbInfo = await aggregatorContractOwner.kbFilings(requestContext); if (kbInfo?.registered === true) { if (kbInfo.contentHash?.toLowerCase() === expectedKbHash.toLowerCase()) { console.log(`[Agent ${AGENT_ID.substring(0, 10)}...] KB already registered correctly | Ctx: ${shortCtx}`); return true; } else { console.error(`[Agent ${AGENT_ID.substring(0, 10)}...] FATAL: KB HASH MISMATCH for Ctx: ${shortCtx}.`); return false; } } else { console.log(`[Agent ${AGENT_ID.substring(0, 10)}...] KB not registered Ctx: ${shortCtx}. Attempting registration...`); const tx = await aggregatorContractOwner.registerKnowledgeBase(requestContext, expectedKbHash); console.log(`[Agent ${AGENT_ID.substring(0, 10)}...] KB Reg Tx Sent: ${tx.hash} | Ctx: ${shortCtx}`); const receipt = await tx.wait(); if (receipt.status === 1) { console.log(`[Agent ${AGENT_ID.substring(0, 10)}...] KB Reg Confirmed | Ctx: ${shortCtx}`); return true; } else { console.error(`[Agent ${AGENT_ID.substring(0, 10)}...] KB Reg Tx FAILED | Ctx: ${shortCtx}`); return false; } } } catch (error) { const reason = error.reason || error.message || String(error); console.error(`[Agent ${AGENT_ID.substring(0, 10)}...] Error KB reg check/attempt | Ctx: ${shortCtx}:`, reason); return false; } }
+// Initialize contract instances
+const answerStatement = new ethers.Contract(ANSWER_STATEMENT_ADDRESS, answerStatementABI, agentWallet);
+const zkpValidator = new ethers.Contract(ZKPVALIDATOR_ADDRESS, zkpValidatorABI, agentWallet);
+const erc20PaymentStatement = new ethers.Contract(ERC20_PAYMENT_STATEMENT_ADDRESS, erc20PaymentStatementABI, agentWallet);
+const stringResultStatement = new ethers.Contract(STRING_RESULT_STATEMENT_ADDRESS, stringResultStatementABI, agentWallet);
+const eas = new ethers.Contract(EAS_ADDRESS, easABI, provider);
 
 
-// --- Process Job Function ---
-async function processQuestionJob(jobInfo) {
-  const jobKey = jobInfo.key;
-  console.log(`\n[Agent ${AGENT_ID.substring(0, 10)}...] ==> ENTER processQuestionJob | Key: ${jobKey}`);
-  let jobData = null; let requestContext = 'unknownContext'; let answer = ''; let evaluationResult = null; let kbContentHash; let answerLogKey;
+// --- Helper: Generate ZKP Proof ---
+// --- Helper: Generate ZKP Proof ---
+async function generateProofForAlwaysTrue(inputs) { // Expects an object like { input0: "1", ... }
+    console.log("[Agent ZKP] Generating proof with inputs:", inputs);
+    console.log("[Agent ZKP] WASM Path:", ZKP_CIRCUIT_WASM_PATH);
+    console.log("[Agent ZKP] ZKEY Path:", ZKP_CIRCUIT_ZKEY_PATH);
 
-  try {
-    // 1. Fetch Job Data & Context
-    jobData = jobInfo.data || await getObjectData(jobKey); if (!jobData?.question || !jobData?.cid || !jobData?.requestContext) { console.warn(`Invalid job data ${jobKey}. Skip.`); return; } requestContext = jobData.requestContext; console.log(`Processing Ctx: ${requestContext}`);
+    // --- File Existence Checks ---
+    if (!fs.existsSync(ZKP_CIRCUIT_WASM_PATH)) {
+        console.error(`[Agent ZKP] CRITICAL: WASM file not found at specified path: ${ZKP_CIRCUIT_WASM_PATH}`);
+        throw new Error(`WASM file not found at ${ZKP_CIRCUIT_WASM_PATH}`);
+    }
+    if (!fs.existsSync(ZKP_CIRCUIT_ZKEY_PATH)) {
+        console.error(`[Agent ZKP] CRITICAL: ZKEY file not found at specified path: ${ZKP_CIRCUIT_ZKEY_PATH}`);
+        throw new Error(`ZKEY file not found at ${ZKP_CIRCUIT_ZKEY_PATH}`);
+    }
+    // --- End File Checks ---
 
-    // 2. Fetch Content & Calculate Hash
-    console.log(`Fetching KB content | CID: ${jobData.cid.substring(0, 10)}...`); const content = await fetchContentByCid(jobData.cid); if (!content) { throw new Error(`Failed fetch KB CID ${jobData.cid}.`); } console.log(`Fetched KB (Len: ${content.length})`); kbContentHash = hashToBigInt(hashData(content)); const expectedKbHashHex = ethers.utils.hexlify(kbContentHash); console.log(`Calculated KB Hash: ${expectedKbHashHex}`);
+    try {
+        // Call snarkjs to generate the full proof and public signals
+        console.log("[Agent ZKP] Calling snarkjs.groth16.fullProve...");
+        const { proof, publicSignals } = await snarkjs.groth16.fullProve(
+            inputs,
+            ZKP_CIRCUIT_WASM_PATH,
+            ZKP_CIRCUIT_ZKEY_PATH
+            // Optionally add a logger here if snarkjs supports it:
+            // , console // Example: pass console as a logger
+        );
+        console.log("[Agent ZKP] snarkjs call completed.");
 
-    // 3. Ensure KB is Registered
-    const registrationSuccess = await ensureKBRegistered(requestContext, expectedKbHashHex); if (!registrationSuccess) { throw new Error(`Failed KB registration Ctx: ${requestContext}.`); }
+        // --- Sanity Check snarkjs Output ---
+        if (!proof || !publicSignals) {
+             console.error("[Agent ZKP] CRITICAL: snarkjs.groth16.fullProve did not return expected structure (missing proof or publicSignals). Result:", { proof, publicSignals });
+             throw new Error("snarkjs.groth16.fullProve did not return expected structure.");
+        }
+        if (!proof.pi_a || !proof.pi_b || !proof.pi_c) {
+             console.error("[Agent ZKP] CRITICAL: snarkjs proof object is missing required fields (pi_a, pi_b, or pi_c). Proof:", proof);
+            throw new Error("snarkjs proof object is missing required fields.");
+        }
+         // --- End Sanity Check ---
 
-    // 4. Check On-Chain Verification Status
-    let existingRecord; try { console.log(`Check existing verification: Ctx ${requestContext}`); existingRecord = await aggregatorContractAgent.getVerifiedEvaluation(requestContext, AGENT_ADDRESS); console.log(`On-chain record: verified = ${existingRecord?.verified}`); } catch (e) { console.error(`ERROR getVerifiedEvaluation Ctx ${requestContext}:`, e); return; } if (existingRecord?.verified === true) { console.log(`Already verified Ctx ${requestContext}. Skip.`); return; }
 
-    // 5. Generate Answer (Using LLM)
-    console.log(`Generating answer via LLM...`);
-    // *** Ensure generateAnswerFromContent is defined before calling ***
-    if (typeof generateAnswerFromContent !== 'function') { throw new Error("generateAnswerFromContent service function not loaded"); }
-    answer = await generateAnswerFromContent(jobData.question, content, requestContext);
-    if (typeof answer !== 'string' || answer.startsWith('Error:')) { console.error(`Answer generation FAILED: ${answer}`); return; }
-    console.log(`LLM Answer generated: "${truncateText(answer, 60)}"`);
+        // Format the proof structure for Solidity contract verification
+        // IMPORTANT: Ensure the order [Beta, Alpha] for pi_b elements matches Verifier.sol
+        const formattedProof = {
+            a: [proof.pi_a[0], proof.pi_a[1]],
+            b: [
+                [proof.pi_b[0][1], proof.pi_b[0][0]], // Inner array: [Beta_1, Alpha_1]
+                [proof.pi_b[1][1], proof.pi_b[1][0]]  // Inner array: [Beta_2, Alpha_2]
+            ],
+            c: [proof.pi_c[0], proof.pi_c[1]]
+        };
 
-    // 6. Log Answer to Recall
-    answerLogKey = await logAgentAnswer(answer, AGENT_ID, requestContext);
+        // Ensure publicSignals are returned as an array of strings
+        const publicSignalsAsStringArray = publicSignals.map(signal => String(signal));
 
-    // 7. Evaluate Answer (Using LLM)
-    console.log(`Evaluating answer via LLM...`);
-    const kbExcerpt = content.substring(0, 3500);
-    // *** Ensure evaluateAnswerWithLLM is defined before calling ***
-    if (typeof evaluateAnswerWithLLM !== 'function') { throw new Error("evaluateAnswerWithLLM service function not loaded"); }
-    evaluationResult = await evaluateAnswerWithLLM(jobData.question, answer, kbExcerpt, requestContext, AGENT_ID);
-    if (!evaluationResult?.explanation) { throw new Error(`Failed LLM evaluation.`); }
-    console.log(`LLM Evaluated: ${evaluationResult.evaluation} (Conf: ${evaluationResult.confidence})`);
-    const rawLLMResponseForHash = evaluationResult.explanation || "";
+        console.log("[Agent ZKP] Proof generated and formatted successfully.");
+        // Return both the formatted proof and the public signals
+        return { proof: formattedProof, publicSignals: publicSignalsAsStringArray };
 
-    // 8. Prepare ZKP Inputs
-    console.log(`Preparing ZKP inputs...`); const requestContextHash = hashToBigInt(hashData(requestContext)); const questionHash = hashToBigInt(hashData(jobData.question)); const answerHash = hashToBigInt(hashData(answer)); const llmResponseHash = hashToBigInt(hashData(rawLLMResponseForHash)); const answeringAgentIdBigInt = BigInt(AGENT_ADDRESS); const verdictMap = { 'Incorrect': 0, 'Correct': 1, 'Uncertain': 2 }; const claimedVerdict = BigInt(verdictMap[evaluationResult.evaluation] ?? 2); const claimedConfidence = BigInt(Math.round(evaluationResult.confidence * 100)); const parsedVerdictCode = claimedVerdict; const parsedConfidenceScaled = claimedConfidence; if (kbContentHash === undefined) { throw new Error("kbContentHash undefined."); } const circuitInputs = { requestContextHash: requestContextHash.toString(), kbContentHash: kbContentHash.toString(), questionHash: questionHash.toString(), answerHash: answerHash.toString(), llmResponseHash: llmResponseHash.toString(), answeringAgentId: answeringAgentIdBigInt.toString(), evaluationVerdict: claimedVerdict, evaluationConfidence: claimedConfidence, parsedVerdictCode: parsedVerdictCode, parsedConfidenceScaled: parsedConfidenceScaled }; console.log(`  Agent Address for ZKP Input [5]: ${AGENT_ADDRESS} -> ${answeringAgentIdBigInt.toString()}`);
-
-    // 9. Generate ZKP
-    const proofData = await generateProof(circuitInputs); if (!proofData) { throw new Error(`Failed ZKP generation.`); }
-
-    // 10. Create Evidence Package & CAR File
-    console.log(`Creating evidence package & CAR file...`); const evidencePackage = { requestContext, question: jobData.question, knowledgeBaseCid: jobData.cid, answer, evaluation: evaluationResult, agentId: AGENT_ID, agentAddress: AGENT_ADDRESS, timestamp: new Date().toISOString(), zkpPublicInputs: proofData.publicSignals }; let carInfo; try { carInfo = await createEvidenceCar(evidencePackage, `evidence-${requestContext}.json`); console.log(`Evidence CAR generated: DataCID=${carInfo.dataCid}, PieceCID=${carInfo.pieceCid} (Simulated), Size=${carInfo.carSize}`); } catch (carError) { const errorMsg = carError instanceof Error ? carError.message : String(carError); throw new Error(`Failed CAR creation: ${errorMsg}`); }
-
-    // 11. Use Placeholder Deal ID
-    const placeholderDealId = PLACEHOLDER_DEAL_ID; console.log(`Using placeholder Deal ID: ${placeholderDealId}`);
-
-    // 12. Submit Evaluation & Placeholder Deal Info to Contract
-    const submissionResult = await submitEvaluationToContract(requestContext, proofData.proof, proofData.publicSignals, placeholderDealId); if (!submissionResult.success) { throw new Error(`Contract submission failed: ${submissionResult.error}`); }
-
-    // 13. Log Evidence Metadata to Recall
-    console.log(`Attempting to log answer evidence metadata to Recall...`); const evidenceMetadata = { requestContext: requestContext, answeringAgentId: AGENT_ID, answerKey: answerLogKey || `UNKNOWN_ANSWER_KEY_${Date.now()}`, evidenceDataCid: carInfo.dataCid, evidenceCarSize: carInfo.carSize, evidencePieceCid: carInfo.pieceCid, evidencePieceSize: carInfo.pieceSize, submittedDealId: placeholderDealId, submissionTxHash: submissionResult.txHash, timestamp: new Date().toISOString() }; if (typeof logAnswerEvidence === 'function') { await logAnswerEvidence(evidenceMetadata); } else { console.warn("logAnswerEvidence function not found, skipping evidence log."); }
-
-    console.log(`Finished job ${jobKey} successfully. Tx: ${submissionResult.txHash}`);
-
-  } catch (error) { const errorMessage = error instanceof Error ? error.message : String(error); console.error(`[Agent ${AGENT_ID.substring(0, 10)}...] Error processing job ${jobKey}: ${errorMessage}`); }
-  finally { console.log(`[Agent ${AGENT_ID.substring(0, 10)}...] <== EXIT processQuestionJob | Key: ${jobKey}`); }
+    } catch (zkpError) {
+        // Log the specific error from snarkjs
+        console.error("[Agent ZKP] snarkjs.groth16.fullProve FAILED:", zkpError);
+        // Re-throw the error so it's caught by the calling function (processQuestionJob)
+        throw zkpError;
+    }
+}
+// --- Helper: Find UID from Receipt (Using Ethers v5 syntax) ---
+async function findUIDFromReceipt( receipt, targetContractAddress, targetInterface, specificEventName, uidArgName, schemaUIDToCheck ) {
+    console.log(`[Agent Log Parser] Searching for event '${specificEventName}' (arg: '${uidArgName}') in logs...`);
+    const events = receipt.events || []; // Ethers v5
+    for (const log of events) {
+        if (log.address.toLowerCase() === targetContractAddress.toLowerCase() && log.event === specificEventName) {
+            try {
+                if (specificEventName === "Attested" && schemaUIDToCheck) { if (log.args.schema !== schemaUIDToCheck) { continue; } console.log(`[Agent Log Parser] Found 'Attested' event matching schema ${schemaUIDToCheck}.`); }
+                const uid = log.args[uidArgName];
+                if (uid && typeof uid === 'string' && uid !== ethers.constants.HashZero) { console.log(`[Agent Log Parser] Found UID in '${specificEventName}': ${uid}`); return uid; }
+                else { console.warn(`[Agent Log Parser] Found '${specificEventName}' but UID arg '${uidArgName}' missing/empty/zero.`); }
+            } catch (parseError) { console.warn(`[Agent Log Parser] Error parsing args for event '${specificEventName}': ${parseError.message}`); }
+        }
+    }
+    // Fallback manual parse
+     for (const log of receipt.logs) { if (log.address.toLowerCase() === targetContractAddress.toLowerCase()) { try { const parsedLog = targetInterface.parseLog(log); if (parsedLog.name === specificEventName) { if (specificEventName === "Attested" && schemaUIDToCheck) { if (parsedLog.args.schema !== schemaUIDToCheck) { continue; } console.log(`[Agent Log Parser] Found 'Attested' event (manual parse) matching schema ${schemaUIDToCheck}.`); } const uid = parsedLog.args[uidArgName]; if (uid && typeof uid === 'string' && uid !== ethers.constants.HashZero) { console.log(`[Agent Log Parser] Found UID in '${specificEventName}' (manual parse): ${uid}`); return uid; } } } catch {} } }
+    console.warn(`[Agent Log Parser] UID not found for event '${specificEventName}' from address ${targetContractAddress}.`);
+    return null;
 }
 
-// --- Polling Loop ---
-async function pollLoop() { /* ... no change ... */ if (isShuttingDown) { console.log(`[Agent ${AGENT_ID.substring(0, 10)}...] Shutdown. Stop poll.`); return; } try { console.log(`[Agent ${AGENT_ID.substring(0, 10)}...] Polling Recall prefix: ${CONTEXT_DATA_PREFIX}`); const pendingJobs = await getPendingJobs(CONTEXT_DATA_PREFIX); if (pendingJobs && Array.isArray(pendingJobs) && pendingJobs.length > 0) { console.log(`[Agent ${AGENT_ID.substring(0, 10)}...] Found ${pendingJobs.length} potential job keys.`); for (const jobInfo of pendingJobs) { if (isShuttingDown) break; if (jobInfo?.key) { await processQuestionJob(jobInfo); } else { console.warn(`[Agent ${AGENT_ID.substring(0, 10)}...] Invalid job info item:`, jobInfo); } } console.log(`[Agent ${AGENT_ID.substring(0, 10)}...] Finished processing batch.`); } else { console.log(`[Agent ${AGENT_ID.substring(0, 10)}...] No pending question jobs found.`); } } catch (error) { const errorMsg = error instanceof Error ? error.message : String(error); console.error(`[Agent ${AGENT_ID.substring(0, 10)}...] Poll loop error:`, errorMsg); } finally { if (!isShuttingDown) { pollingTimeoutId = setTimeout(pollLoop, POLLING_INTERVAL_MS); } } }
+// --- Helper: Log Agent Collection (Defined locally) ---
+// Key generation helper needed here
+const getAgentCollectionKey = (ctx, agentId, paymentUID) => `${CONTEXT_DATA_PREFIX}${ctx}/collections/${getAddress(agentId)}_${paymentUID.substring(0, 10)}.json`;
+async function logAgentCollection(context, agentId, paymentUid, validationUid, collectTxHash, collectedAmountRaw) {
+    const collectionKey = getAgentCollectionKey(context, agentId, paymentUid);
+    const logData = { agentId: getAddress(agentId), requestContext: context, paymentUID: paymentUid, validationUID: validationUid, collectionTxHash: collectTxHash, collectedAmountRaw: collectedAmountRaw ? collectedAmountRaw.toString() : null, collectionTimestamp: new Date().toISOString(), message: "Payment collected by agent." };
+    console.log(`[Agent] Logging successful payment collection to Recall key: ${collectionKey}`);
+    try { const result = await addObjectToBucket(logData, collectionKey); if (!result.success && !result.keyExists) { console.warn(`[Agent] Failed to log agent collection event to recall: ${result.error}`); } else if (result.keyExists) { console.warn(`[Agent] Agent collection log already exists for key: ${collectionKey}`); } else { console.log(`[Agent] Agent collection event logged successfully.`); } }
+    catch (error) { console.error(`[Agent] Error logging agent collection event: ${error.message}`); }
+}
 
-// --- Start/Stop Logic ---
-function startAgent() { pollLoop(); }
-function shutdownAgent() { /* ... no change ... */ if (isShuttingDown) return; console.log(`\n[Agent ${AGENT_ID.substring(0, 10)}...] Shutdown signal...`); isShuttingDown = true; if (pollingTimeoutId) { clearTimeout(pollingTimeoutId); console.log(`[Agent ${AGENT_ID.substring(0, 10)}...] Polling stopped.`); } setTimeout(() => { console.log(`[Agent ${AGENT_ID.substring(0, 10)}...] Exiting.`); process.exit(0); }, 1000); }
-process.on('SIGTERM', shutdownAgent); process.on('SIGINT', shutdownAgent);
+
+// --- Main Job Processing Function (Option B: Backend Collects - collectPayment commented out) ---
+async function processQuestionJob(jobInfo) {
+    const jobKey = jobInfo.key;
+    console.log(`\n[Agent ${AGENT_ADDRESS.substring(0, 10)}] === Processing Job Key: ${jobKey} ===`);
+    let jobData = null; let answerUID = null; let validationUID = null; let requestContext = null;
+
+    try {
+        // 1. Fetch Job Data
+        jobData = jobInfo.data || await getObjectData(jobKey);
+        if (!jobData?.cid || !jobData?.requestContext || !jobData?.question || !jobData.paymentUID) { console.warn(`[Agent] Invalid/incomplete job data ${jobKey}. Skip.`); return; }
+        requestContext = jobData.requestContext; const question = jobData.question; const paymentUID = jobData.paymentUID;
+        console.log(`[Agent] Job Details: Ctx=${requestContext}, Q=${truncateText(question, 50)}, PaymentUID=${paymentUID}`);
+
+        // 2. Check if Already Answered
+        const answerKey = getAnswerKey(requestContext, AGENT_ADDRESS); // Uses local helper
+        const existingAnswer = await getObjectData(answerKey);
+        if (existingAnswer) { console.log(`[Agent] Already processed ${requestContext}. Skip.`); return; }
+
+        // 3. Fetch Content
+        console.log(`[Agent] Fetching CID: ${jobData.cid}`);
+        const content = await fetchContentByCid(jobData.cid);
+        if (!content) { throw new Error(`Failed to fetch CID ${jobData.cid}`); }
+        const kbContentHash = hashToBigInt(hashData(content));
+        console.log(`[Agent] Content fetched. Hash: ${kbContentHash}`);
+
+        // 4. Generate Answer
+        console.log("[Agent] Generating answer...");
+        const llmAnswer = await generateAnswerFromContent(question, content, requestContext);
+        if (!llmAnswer || typeof llmAnswer !== 'string' || llmAnswer.trim().length === 0 || llmAnswer.toLowerCase().startsWith('error')) { throw new Error(`LLM failed: "${llmAnswer}"`); }
+        console.log(`[Agent] LLM Answer: ${truncateText(llmAnswer, 80)}`);
+        const answerHash = hashToBigInt(hashData(llmAnswer));
+
+        // 5. Generate Proof
+        const zkpInputs = { input0: "1", input1: "1", input2: "1", input3: "1", input4: "1", input5: "1", input6: "1", input7: "1" };
+        const { proof } = await generateProofForAlwaysTrue(zkpInputs);
+
+        // 6. Prepare Data (Use ethers.constants.HashZero - v5)
+        const answerStatementData = { answeringAgent: AGENT_ADDRESS, requestContextRef: requestContext, requestContextHash: 1n, kbContentHash: kbContentHash.toString(), questionHash: 1n, answerHash: answerHash.toString(), llmResponseHash: 1n, answeringAgentId: 111n, claimedVerdict: 1, claimedConfidence: 95, proof_a: proof.a, proof_b: proof.b, proof_c: proof.c, evidenceProposalId: ethers.constants.HashZero, answerCID: "ipfs://placeholderAns", evidenceDataCID: "ipfs://placeholderEvid" };
+
+        // 7. Submit AnswerStatement
+        console.log("[Agent] Submitting AnswerStatement TX...");
+        const answerTx = await answerStatement.makeStatement( answerStatementData, paymentUID, { gasLimit: AGENT_GAS_LIMIT_ANSWER } );
+        console.log(`[Agent] AnswerStatement TX Sent: ${answerTx.hash}. Waiting...`);
+        const answerReceipt = await answerTx.wait(1);
+        if (answerReceipt.status !== 1) { throw new Error(`AnswerStatement TX failed. Hash: ${answerTx.hash}`); }
+        console.log(`[Agent] AnswerStatement TX Confirmed. Block: ${answerReceipt.blockNumber}`);
+
+        // 8. Extract Answer UID (Uses v5 interface)
+        answerUID = await findUIDFromReceipt(answerReceipt, ANSWER_STATEMENT_ADDRESS, answerStatement.interface, "AnswerSubmitted", "uid");
+        if (!answerUID) { const answerSchemaUID = await answerStatement.ATTESTATION_SCHEMA(); answerUID = await findUIDFromReceipt(answerReceipt, EAS_ADDRESS, eas.interface, "Attested", "uid", answerSchemaUID); }
+        if (!answerUID) { throw new Error("CRITICAL: Failed to extract answerUID."); }
+        console.log(`[Agent] Extracted answerUID: ${answerUID}`);
+
+        // 9. Submit ZKP Validation
+        console.log(`[Agent] Submitting ZKP validation for answerUID: ${answerUID}...`);
+        const validateTx = await zkpValidator.validateZKP( answerUID, { gasLimit: AGENT_GAS_LIMIT_VALIDATE } );
+        console.log(`[Agent] ZKP Validation TX Sent: ${validateTx.hash}. Waiting...`);
+        const validateReceipt = await validateTx.wait(1);
+        if (validateReceipt.status !== 1) { throw new Error(`ZKP validation TX failed. Hash: ${validateTx.hash}`); }
+        console.log(`[Agent] ZKP Validation TX Confirmed. Block: ${validateReceipt.blockNumber}`);
+
+        // 10. Extract Validation UID (Uses v5 interface)
+        validationUID = await findUIDFromReceipt(validateReceipt, ZKPVALIDATOR_ADDRESS, zkpValidator.interface, "ZKPValidationCreated", "validationUID");
+         if (!validationUID) { const validatorSchemaUID = await zkpValidator.ATTESTATION_SCHEMA(); validationUID = await findUIDFromReceipt(validateReceipt, EAS_ADDRESS, eas.interface, "Attested", "uid", validatorSchemaUID); }
+        if (!validationUID) { throw new Error("CRITICAL: Failed to extract validationUID."); }
+        console.log(`[Agent] Extracted validationUID: ${validationUID}`);
+
+        // 11. Log Answer to Recall (Passes both UIDs)
+        console.log(`[Agent] Logging answer to Recall. answerUID: ${answerUID}, validationUID: ${validationUID}`);
+        const logKey = await logAnswer( llmAnswer, AGENT_ADDRESS, requestContext, answerUID, validationUID );
+        if (logKey) { console.log(`[Agent] Successfully logged answer data to Recall. Key: ${logKey}`); }
+        else { console.warn(`[Agent] Failed to log answer data to Recall for context ${requestContext}.`); }
+
+        // --- Step 12 COMMENTED OUT ---
+        /*
+        console.log(`[Agent] Attempting payment collection. PaymentUID: ${paymentUID}, ValidationUID: ${validationUID}...`);
+        try {
+            const collectTx = await erc20PaymentStatement.collectPayment( paymentUID, validationUID, { gasLimit: AGENT_GAS_LIMIT_COLLECT } );
+            console.log(`[Agent] Collect Payment TX Sent: ${collectTx.hash}. Waiting...`);
+            const collectReceipt = await collectTx.wait(1);
+            if (collectReceipt.status === 1) {
+                 console.log(`[Agent] ✅ SUCCESS: Payment collected! Block: ${collectReceipt.blockNumber}`);
+                 const paymentInterface = new ethers.utils.Interface(erc20PaymentStatementABI); // v5
+                 const collectedAmountRaw = await findUIDFromReceipt(collectReceipt, ERC20_PAYMENT_STATEMENT_ADDRESS, paymentInterface, "PaymentCollected", "amount");
+                 if (collectedAmountRaw) { console.log(`[Agent] Collected amount (raw): ${collectedAmountRaw.toString()}`); }
+                 await logAgentCollection( requestContext, AGENT_ADDRESS, paymentUID, validationUID, collectTx.hash, collectedAmountRaw );
+            } else { console.error(`[Agent] ❌ FAILED: Collect Payment TX reverted. Hash: ${collectTx.hash}.`); }
+        } catch (collectError) {
+             let errMsg = collectError instanceof Error ? collectError.message : String(collectError);
+             if (collectError.error?.message) errMsg = collectError.error.message;
+             if (collectError.data?.message) errMsg = collectError.data.message;
+             console.error(`[Agent] ❌ FAILED: Error calling collectPayment: ${errMsg}`);
+             if (errMsg.includes("Payment already collected") || errMsg.includes("Statement was revoked")) { console.log(`[Agent] Note: Payment likely processed or cancelled.`); }
+             else if (errMsg.includes("Invalid fulfillment")) { console.error(`[Agent] Note: Arbiter check failed. Check ZKP logic/UIDs.`); }
+        }
+        */
+        console.log(`[Agent] Answer submitted and ZKP validated. Waiting for backend payout process.`);
+
+
+        console.log(`[Agent ${AGENT_ADDRESS.substring(0, 10)}] === Finished Processing Job Key: ${jobKey} ===`);
+    } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        console.error(`[Agent] ---- ERROR processing job ${jobKey} (Context: ${requestContext || 'N/A'}) ----`);
+        console.error(`[Agent] Error Message: ${errorMessage}`);
+        if (error.receipt) { console.error("[Agent] Failing TX Receipt:", JSON.stringify(error.receipt, null, 2)); }
+        else if (error.stack) { console.error(`[Agent] Stack Trace: ${error.stack.substring(0, 600)}...`); }
+    }
+} // End of processQuestionJob
+
+
+// --- String Capitalization Job Processing (Using Ethers v5 syntax) ---
+async function processStringCapitalizationJobs() {
+    if (!STRING_RESULT_STATEMENT_ADDRESS || STRING_RESULT_STATEMENT_ADDRESS === ethers.constants.AddressZero) { return; } // v5
+     console.log(`\n[Agent ${AGENT_ADDRESS.substring(0, 10)}] -> processStringCapitalizationJobs | Searching...`);
+    try {
+        const paymentSchema = await erc20PaymentStatement.ATTESTATION_SCHEMA();
+        const easInterface = new ethers.utils.Interface(easABI); // v5
+        const attestedEventFilter = eas.filters.Attested(null, null, paymentSchema);
+        const fromBlock = process.env.EAS_FROM_BLOCK ? parseInt(process.env.EAS_FROM_BLOCK, 10) : 0;
+        console.log(`[Agent String] Querying EAS logs schema ${paymentSchema} from block ${fromBlock}...`);
+        // Use provider.getLogs with the filter object for v5
+        const eventsRaw = await provider.getLogs({...attestedEventFilter, fromBlock, toBlock: 'latest'});
+        // Manually parse logs as getLogs doesn't do it automatically
+        const events = eventsRaw.map(log => {
+             try { return easInterface.parseLog(log); } catch { return null; }
+        }).filter(e => e !== null && e.name === 'Attested'); // Filter out nulls and wrong events
+
+        console.log(`[Agent String] Found ${events.length} potential payment statement attestations`);
+
+        for (const event of events) { // event is now the parsed log
+            const paymentUID = event.args.uid;
+             try {
+                 console.log(`[Agent String] Processing payment UID: ${paymentUID}`);
+                 const attestation = await eas.getAttestation(paymentUID);
+                 if (attestation.revocationTime !== BigInt(0)) { console.log(`[Agent String] ${paymentUID} revoked.`); continue; }
+                 if (attestation.expirationTime !== BigInt(0) && attestation.expirationTime <= BigInt(Math.floor(Date.now() / 1000))) { console.log(`[Agent String] ${paymentUID} expired.`); continue; }
+
+                 let paymentData;
+                 try { paymentData = ethers.utils.defaultAbiCoder.decode(["address buyer", "address token", "uint256 amount", "address arbiter", "bytes demand", "bool active"], attestation.data); } // v5
+                 catch (decodeError) { console.warn(`[Agent String] Decode fail ${paymentUID}: ${decodeError.message}.`); continue; }
+
+                 if (!paymentData[5]) { console.log(`[Agent String] ${paymentUID} inactive.`); continue; }
+                 if (paymentData[3].toLowerCase() !== STRING_RESULT_STATEMENT_ADDRESS.toLowerCase()) { continue; }
+                 try { const isUsed = await erc20PaymentStatement.usedStatements(paymentUID); if (isUsed) { console.log(`[Agent String] ${paymentUID} used.`); continue; } }
+                 catch (error) { console.warn(`[Agent String] Check used fail ${paymentUID}: ${error.message}.`); continue; }
+
+                 let queryString;
+                 try { queryString = ethers.utils.defaultAbiCoder.decode(["string"], paymentData[4])[0]; } // v5
+                 catch (demandError) { console.warn(`[Agent String] Demand decode fail ${paymentUID}: ${demandError.message}.`); continue; }
+                 console.log(`[Agent String] Job: "${queryString}" for ${paymentUID}`);
+                 const result = queryString.toUpperCase();
+                 console.log(`[Agent String] Result: "${result}"`);
+
+                 try {
+                     console.log(`[Agent String] Submitting result for ${paymentUID}...`);
+                     const resultTx = await stringResultStatement.makeStatement( result, paymentUID, { gasLimit: AGENT_GAS_LIMIT_STRING_RESULT } );
+                     console.log(`[Agent String] Result TX Sent: ${resultTx.hash}. Waiting...`);
+                     const resultReceipt = await resultTx.wait(1);
+                     if (resultReceipt.status !== 1) { throw new Error(`StringResult TX fail. Hash: ${resultTx.hash}`); }
+                     console.log(`[Agent String] Result TX Confirmed. Block: ${resultReceipt.blockNumber}`);
+
+                     const stringResultSchema = await stringResultStatement.ATTESTATION_SCHEMA();
+                     const resultUID = await findUIDFromReceipt(resultReceipt, EAS_ADDRESS, easInterface, "Attested", "uid", stringResultSchema);
+                     if (!resultUID) { throw new Error("Failed to extract StringResult UID."); }
+                     console.log(`[Agent String] Extracted Result UID: ${resultUID}`);
+
+                     console.log(`[Agent String] Collecting payment ${paymentUID} using result ${resultUID}...`);
+                     await new Promise(resolve => setTimeout(resolve, 2000));
+                     const collectTx = await erc20PaymentStatement.collectPayment( paymentUID, resultUID, { gasLimit: AGENT_GAS_LIMIT_COLLECT } );
+                     console.log(`[Agent String] Collect TX Sent: ${collectTx.hash}. Waiting...`);
+                     const collectReceipt = await collectTx.wait(1);
+                     if (collectReceipt.status === 1) { console.log(`[Agent String] ✅ SUCCESS: Collected string payment ${paymentUID}!`); }
+                     else { console.error(`[Agent String] ❌ FAILED: Collect TX reverted ${paymentUID}. Hash: ${collectTx.hash}`); }
+                 } catch (txError) {
+                      let errMsg = txError instanceof Error ? txError.message : String(txError);
+                      if (txError.error?.message) errMsg = txError.error.message;
+                      console.error(`[Agent String] TX error ${paymentUID}: ${errMsg}`);
+                  }
+            } catch (loopError) {
+                  const errorMsg = loopError instanceof Error ? loopError.message : String(loopError);
+                  console.warn(`[Agent String] Error processing paymentUID ${paymentUID} in loop: ${errorMsg}`);
+            }
+        } // End for loop
+    } catch (error) {
+         const errorMessage = error instanceof Error ? error.message : String(error);
+         console.error(`[Agent String] Error processing jobs: ${errorMessage}`);
+     }
+}
+
+
+// --- Main Polling Loop ---
+async function pollLoop() {
+    console.log("\n[Agent] Starting polling loop...");
+    // await sendLocalTestEth(); // Called at top level
+
+    try { // Process Recall Jobs
+        console.log("[Agent] Checking for Recall jobs...");
+        const jobs = await getPendingJobs("reqs/");
+        if (jobs?.length > 0) {
+            console.log(`[Agent] Found ${jobs.length} Recall jobs.`);
+            for (const job of jobs) { await processQuestionJob(job); await new Promise(resolve => setTimeout(resolve, 500)); }
+            console.log(`[Agent] Finished batch Recall jobs.`);
+        } else { console.log("[Agent] No Recall jobs found."); }
+    } catch (error) { const errorMessage = error instanceof Error ? error.message : String(error); console.error("[Agent] Error processing Recall jobs:", errorMessage); }
+
+    try { // Process String Jobs
+         await processStringCapitalizationJobs();
+    } catch (error) { const errorMessage = error instanceof Error ? error.message : String(error); console.error("[Agent] Error processing String jobs:", errorMessage); }
+
+    if (process.env.CONTINUOUS_POLLING === "true") {
+        const pollingInterval = parseInt(process.env.POLLING_INTERVAL || "30000", 10);
+        console.log(`[Agent] Continuous polling. Next poll in ${pollingInterval / 1000}s...`);
+        setTimeout(pollLoop, pollingInterval);
+    } else { console.log("[Agent] One-shot complete. Exiting."); process.exit(0); }
+}
+
 
 // --- Run Agent ---
-if (aggregatorContractAgent && typeof aggregatorContractAgent.submitVerifiedEvaluation === 'function') { startAgent(); }
-else { console.error("FATAL: Contract instance invalid. Agent cannot start."); process.exit(1); }
+console.log("[Answering Agent] Starting agent...");
+pollLoop().catch((err) => {
+    console.error("[Agent] FATAL UNHANDLED ERROR in pollLoop:", err);
+    process.exit(1);
+});

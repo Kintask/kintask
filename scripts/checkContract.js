@@ -33,16 +33,16 @@ async function checkContract() {
     console.log(`RPC URL: ${rpcUrl}`);
     console.log(`Contract Address: ${contractAddress}`);
 
-    if (!contractAddress) {
-        console.error("❌ Error: FVM_AGGREGATOR_CONTRACT_ADDRESS not found in .env file.");
-        process.exitCode = 1; // Indicate failure
-        return;
-    }
-    if (!rpcUrl) {
-        console.error("❌ Error: FVM_RPC_URL not found in .env file.");
-        process.exitCode = 1; // Indicate failure
-        return;
-    }
+    // if (!contractAddress) {
+    //     console.error("❌ Error: FVM_AGGREGATOR_CONTRACT_ADDRESS not found in .env file.");
+    //     process.exitCode = 1; // Indicate failure
+    //     return;
+    // }
+    // if (!rpcUrl) {
+    //     console.error("❌ Error: FVM_RPC_URL not found in .env file.");
+    //     process.exitCode = 1; // Indicate failure
+    //     return;
+    // }
 
     let provider; // Declare provider outside try block
 

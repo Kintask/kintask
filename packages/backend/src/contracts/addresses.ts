@@ -7,6 +7,6 @@ export const FVM_AGGREGATOR_CONTRACT_ADDRESS = config.fvmAggregatorContractAddre
 if (!KINTASK_COMMITMENT_CONTRACT_ADDRESS && process.env.NODE_ENV !== 'test') {
     console.warn("Backend Config Warning: KINTASK_CONTRACT_ADDRESS is not set in .env!");
 }
-if (!FVM_AGGREGATOR_CONTRACT_ADDRESS && process.env.NODE_ENV !== 'test') {
-    console.warn("Backend Config Warning: FVM_AGGREGATOR_CONTRACT_ADDRESS is not set in .env!");
-}
+// if (!FVM_AGGREGATOR_CONTRACT_ADDRESS && process.env.NODE_ENV !== 'test') {
+//     console.warn("Backend Config Warning: FVM_AGGREGATOR_CONTRACT_ADDRESS is not set in .env!");
+// }

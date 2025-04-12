@@ -1,15 +1,10 @@
-// src/services/evaluationPayoutService.ts
-
 import config from '../config';
-// Import necessary types
 import {
     QuestionData,
-    AnswerData,
-    EvaluationResult,
-    JobStatus,
+    AnswerData, // Assumes this now includes validationUID?
+    EvaluationResult, // Assumes results array items now include validationUID?
     PayoutStatusData,
-} from '../types';
-// Import services
+} from '../types'; // Adjust import path as needed
 import {
     logEvaluationResult as recallLogEvaluationResult,
     logPayoutStatus as recallLogPayoutStatus,
@@ -18,29 +13,29 @@ import {
     getRecallClient,
     getPendingJobs,
     initializeAccount,
-    deleteObject,
-} from './recallService'; // Import from the MODIFIED recallService
-import { fetchContentByCid } from './filecoinService';
-import { evaluateAnswerWithLLM, LLMEvaluationResult } from './generatorService';
+} from './recallService'; // Adjust import path as needed
+import { fetchContentByCid } from './filecoinService'; // Adjust import path as needed
+import { evaluateAnswerWithLLM, LLMEvaluationResult } from './generatorService'; // Adjust import path as needed
 import {
-    registerAgent,
-    submitVerificationResult,
-    triggerAggregation,
-} from './fvmContractService';
+    payoutToAgentOnchain,
+    // triggerAggregation // Keep commented if not used
+} from './fvmContractService'; // Adjust import path as needed
 import { getAddress, Address, isAddress } from 'viem';
-import { truncateText } from '../utils';
+import { truncateText } from '../utils'; // Adjust import path as needed
 
 // --- Configuration ---
 const EVALUATION_POLLING_INTERVAL_MS = 45000;
 const PAYOUT_POLLING_INTERVAL_MS = 120000;
+const EVALUATION_WAIT_TIME_MS = 60_000; // 1 minute wait after question
 
 let BACKEND_EVALUATOR_ID: Address = "0xBackendEvaluatorPlaceholder";
 try {
-    const backendAccount = initializeAccount();
+    const backendAccount = initializeAccount(); // Ensure this provides the correct account
     BACKEND_EVALUATOR_ID = backendAccount.address;
     console.log(`[EvaluationPayoutService] Using Backend Evaluator/Payout ID: ${BACKEND_EVALUATOR_ID}`);
 } catch (e: any) {
     console.error("[EvaluationPayoutService] ERROR: Could not derive backend agent ID.", e.message);
+    // Consider if you should exit or continue with a placeholder
 }
 
 // --- Prefixes and Keys ---
@@ -50,16 +45,6 @@ const getAnswersPrefix = (ctx: string) => `${CONTEXT_DATA_PREFIX}${ctx}/answers/
 const getEvaluationKey = (ctx: string) => `${CONTEXT_DATA_PREFIX}${ctx}/evaluation.json`;
 const getPayoutKey = (ctx: string) => `${CONTEXT_DATA_PREFIX}${ctx}/payout.json`;
 
-// --- Agent Payout Addresses ---
-const agentPayoutAddresses: Record<Address, Address | undefined> = {
-    [getAddress("0xe6272C7fBF8696d269c3d37c18AFA112ADeD9ac7")]: getAddress("0x25D40008ffC27D95D506224a246916d7E7ac0f36"),
-};
-
-if (Object.keys(agentPayoutAddresses).length === 0)
-    console.warn("[EvaluationPayoutService] WARNING: Agent Payout Address mapping is empty!");
-else
-    console.log("[EvaluationPayoutService] Loaded Agent Payout Address Mappings:", agentPayoutAddresses);
-
 // --- State ---
 let evaluationPollTimer: NodeJS.Timeout | null = null;
 let payoutPollTimer: NodeJS.Timeout | null = null;
@@ -67,207 +52,31 @@ let isShuttingDown = false;
 let isEvaluatingMap = new Map<string, boolean>();
 let isProcessingPayoutMap = new Map<string, boolean>();
 
-// --- Helper Functions ---
-async function getQuestionAndContent(
-    requestContext: string
-): Promise<{ questionData: QuestionData | null; content: string | null }> {
+// --- Helper ---
+async function getQuestionAndContent(requestContext: string): Promise<{ questionData: QuestionData | null, content: string | null }> {
     const questionKey = getQuestionKey(requestContext);
     const questionData = await getObjectData<QuestionData>(questionKey);
     if (!questionData?.cid || !questionData?.question) {
-        console.warn(`[EvalPay DEBUG] getQnC: Q data missing/invalid | Ctx: ${requestContext}, Key: ${questionKey}`);
+        console.warn(`[Helper] Missing CID or question in ${questionKey}`);
         return { questionData: null, content: null };
     }
     const content = await fetchContentByCid(questionData.cid);
     if (!content) {
-        console.warn(`[EvalPay DEBUG] getQnC: Failed fetch KB | Ctx: ${requestContext} (CID: ${questionData.cid})`);
-        return { questionData, content: null };
+        console.warn(`[Helper] Failed to fetch content for CID ${questionData.cid}`);
+        return { questionData, content: null }; // Return question data even if content fetch fails
     }
-    console.log(`[EvalPay DEBUG] getQnC: OK Ctx: ${requestContext}`);
     return { questionData, content };
 }
 
-/**
- * Create final payout log for terminal evaluation states (NoValidAnswers, Error)
- */
-async function finalizePayoutLog(
-    requestContext: string,
-    evaluationStatus: 'NoValidAnswers' | 'Error'
-): Promise<void> {
-    const shortCtx = requestContext.substring(0, 10);
-    console.log(
-        `[EvalPay DEBUG] Finalizing payout log for Ctx: ${shortCtx} due to Eval Status: ${evaluationStatus}`
-    );
+async function finalizePayoutLog(requestContext: string, evaluationStatus: 'NoValidAnswers' | 'Error') {
     const payoutStatus: PayoutStatusData = {
         requestContext,
-        stage: `FinalizedFrom${evaluationStatus}`,
-        success: false, // Not a successful payout scenario
-        message:
-            evaluationStatus === 'NoValidAnswers'
-                ? 'No valid answers found during evaluation.'
-                : 'Evaluation process resulted in an error.',
-        processedAgents: 0, // N/A
-        correctAnswers: 0,  // N/A
-        submissionsSent: 0, // N/A
-        fvmErrors: 0,       // N/A
-        txHashes: {},
-        payoutAgentId: BACKEND_EVALUATOR_ID,
-        payoutTimestamp: new Date().toISOString(),
-    };
-    // Attempt to log this final status
-    await recallLogPayoutStatus(payoutStatus, requestContext);
-    console.log(`[EvalPay DEBUG] Final payout log attempt finished for Ctx: ${shortCtx}`);
-}
-
-/** Evaluates answers */
-async function evaluateAnswers(requestContext: string): Promise<void> {
-    const shortCtx = requestContext.substring(0, 10);
-    if (isEvaluatingMap.get(requestContext)) {
-        console.log(`[EvalPay DEBUG] evaluateAnswers: Eval in progress | Ctx: ${shortCtx}. Skip.`);
-        return;
-    }
-    isEvaluatingMap.set(requestContext, true);
-    console.log(`[EvalPay DEBUG] ===> ENTER evaluateAnswers | Ctx: ${shortCtx}`);
-
-    const evaluationOutput: EvaluationResult = {
-        requestContext: requestContext,
-        results: [],
-        status: 'Error',
-        evaluatorAgentId: BACKEND_EVALUATOR_ID,
-        timestamp: new Date().toISOString(),
-    };
-
-    try {
-        console.log(`[EvalPay DEBUG] evaluateAnswers: Check existing eval log | Ctx: ${shortCtx}`);
-        const existingEval = await getObjectData(getEvaluationKey(requestContext));
-        if (existingEval) {
-            console.log(`[EvalPay DEBUG] evaluateAnswers: Eval log EXISTS | Ctx: ${shortCtx}. Skip evaluation.`);
-            isEvaluatingMap.delete(requestContext);
-            return;
-        }
-        console.log(`[EvalPay DEBUG] evaluateAnswers: No existing eval log | Ctx: ${shortCtx}. Proceeding.`);
-
-        const { questionData, content } = await getQuestionAndContent(requestContext);
-        if (!questionData || !content) {
-            throw new Error(`Missing question/content for ${shortCtx}`);
-        }
-        console.log(`[EvalPay DEBUG] evaluateAnswers: Got question/content | Ctx: ${shortCtx}`);
-
-        const recall = await getRecallClient();
-        const bucketAddr = await findLogBucketAddressOrFail(recall);
-        const answerPrefix = getAnswersPrefix(requestContext);
-        console.log(
-            `[EvalPay DEBUG] evaluateAnswers: Querying answers | Ctx: ${shortCtx} | Prefix: ${answerPrefix}`
-        );
-        const { result: answersResult } = await recall.bucketManager().query(bucketAddr, { prefix: answerPrefix });
-        const allAnswerKeys = (answersResult?.objects || [])
-            .map((o: any) => o.key)
-            .filter((k?: string): k is string => !!k && k.endsWith('.json'));
-        console.log(
-            `[EvalPay DEBUG] evaluateAnswers: Found ${allAnswerKeys.length} answer keys | Ctx: ${shortCtx}`
-        );
-
-        if (allAnswerKeys.length === 0) {
-            console.warn(`[EvalPay DEBUG] evaluateAnswers: No answer files found | Ctx: ${shortCtx}`);
-            evaluationOutput.status = 'NoValidAnswers';
-            await recallLogEvaluationResult(evaluationOutput, requestContext);
-            isEvaluatingMap.delete(requestContext);
-            return;
-        }
-
-        const excerpt = truncateText(content, 3500);
-        const evaluationPromises = allAnswerKeys.map(async (answerKey: string) => {
-            const answerData = await getObjectData<AnswerData>(answerKey);
-            if (!answerData?.answer || !answerData?.answeringAgentId) {
-                console.warn(`[EvalPay DEBUG] Invalid answer data key ${answerKey}`);
-                return null;
-            }
-            console.log(
-                `[EvalPay DEBUG] Evaluating answer | Ctx: ${shortCtx} | Agent: ${answerData.answeringAgentId.substring(
-                    0,
-                    10
-                )}...`
-            );
-            const evaluation: LLMEvaluationResult = await evaluateAnswerWithLLM(
-                questionData.question,
-                answerData.answer,
-                excerpt,
-                requestContext,
-                BACKEND_EVALUATOR_ID
-            );
-            console.log(
-                `[EvalPay DEBUG] LLM Eval Result | Ctx: ${shortCtx} | Agent: ${answerData.answeringAgentId.substring(
-                    0,
-                    10
-                )}... | Verdict: ${evaluation.evaluation}`
-            );
-            return {
-                answeringAgentId: answerData.answeringAgentId,
-                answerKey,
-                evaluation: evaluation.evaluation,
-                confidence: evaluation.confidence,
-                explanation: evaluation.explanation,
-            };
-        });
-        const completedEvaluations = (await Promise.all(evaluationPromises)).filter(
-            (e): e is EvaluationResult['results'][0] => e !== null
-        );
-        evaluationOutput.results = completedEvaluations;
-        console.log(
-            `[EvalPay DEBUG] evaluateAnswers: Completed ${completedEvaluations.length} evaluations | Ctx: ${shortCtx}`
-        );
-
-        if (evaluationOutput.results.length > 0) {
-            const hasCorrect = evaluationOutput.results.some((r) => r.evaluation === 'Correct');
-            evaluationOutput.status = hasCorrect ? 'PendingPayout' : 'NoValidAnswers';
-        } else {
-            evaluationOutput.status = 'NoValidAnswers';
-        }
-        console.log(
-            `[EvalPay DEBUG] evaluateAnswers: Final status determined: ${evaluationOutput.status} | Ctx: ${shortCtx}`
-        );
-        console.log(
-            `[EvalPay DEBUG] evaluateAnswers: Attempting log | Ctx: ${shortCtx} | Status: ${evaluationOutput.status}`
-        );
-        const logKey = await recallLogEvaluationResult(evaluationOutput, requestContext);
-        console.log(
-            `[EvalPay DEBUG] evaluateAnswers: Log attempt result (key/undefined): ${logKey} | Ctx: ${shortCtx}`
-        );
-    } catch (error: any) {
-        const errorMessage = error.message || String(error);
-        console.error(`[EvalPay DEBUG] evaluateAnswers: CATCH BLOCK | Ctx: ${shortCtx}: ${errorMessage}`);
-        evaluationOutput.status = 'Error';
-        try {
-            console.log(`[EvalPay DEBUG] evaluateAnswers: Attempting log ERROR status | Ctx: ${shortCtx}`);
-            await recallLogEvaluationResult(evaluationOutput, requestContext);
-        } catch (logErr: any) {
-            console.error(`[EvalPay DEBUG] evaluateAnswers: Failed log ERROR status: ${logErr.message}`);
-        }
-    } finally {
-        isEvaluatingMap.delete(requestContext);
-        console.log(
-            `[EvalPay DEBUG] <=== EXIT evaluateAnswers | Ctx: ${shortCtx} | Final Status: ${evaluationOutput.status}`
-        );
-    }
-}
-
-/** Processes payout for PendingPayout status */
-async function processPayout(evaluationData: EvaluationResult): Promise<void> {
-    const requestContext = evaluationData.requestContext;
-    const shortCtx = requestContext.substring(0, 10);
-    if (isProcessingPayoutMap.get(requestContext)) {
-        console.log(`[EvalPay DEBUG] processPayout: Payout already in progress | Ctx: ${shortCtx}. Skip.`);
-        return;
-    }
-    isProcessingPayoutMap.set(requestContext, true);
-    const logPrefix = `[Payout Ctx: ${shortCtx}]`;
-    console.log(`[EvalPay DEBUG] ===> ENTER processPayout | Ctx: ${shortCtx}`);
-
-    let payoutStatus: PayoutStatusData = {
-        requestContext,
-        stage: 'Start',
+        stage: `Finalized-${evaluationStatus}`, // Changed stage slightly
         success: false,
-        message: 'Payout initiated.',
-        processedAgents: 0,
+        message: evaluationStatus === 'NoValidAnswers'
+            ? 'No valid answers found or eligible for payout.'
+            : 'Evaluation or payout process resulted in an error.',
+        processedAgents: 0, // Might want to populate this based on available data
         correctAnswers: 0,
         submissionsSent: 0,
         fvmErrors: 0,
@@ -275,208 +84,423 @@ async function processPayout(evaluationData: EvaluationResult): Promise<void> {
         payoutAgentId: BACKEND_EVALUATOR_ID,
         payoutTimestamp: new Date().toISOString(),
     };
-    let fvmErrors = 0;
+    try {
+        await recallLogPayoutStatus(payoutStatus, requestContext);
+        console.log(`[Finalize] Logged final payout status for ${requestContext} as ${evaluationStatus}`);
+    } catch (logErr: any) {
+        console.error(`[Finalize] FATAL: Failed to log final payout status for ${requestContext}: ${logErr.message}`);
+    }
+}
+
+/** Main LLM evaluation (waits 1min from question time) */
+async function evaluateAnswers(requestContext: string) {
+    if (isEvaluatingMap.get(requestContext)) {
+        console.log(`[Eval] Evaluation already in progress for context: ${requestContext}`);
+        return;
+    }
+    isEvaluatingMap.set(requestContext, true);
+    console.log(`[Eval] ==== evaluateAnswers BEGIN for context: ${requestContext} ====`);
+
+    // Default error state for evaluation output
+    const evaluationOutput: EvaluationResult = {
+        requestContext,
+        results: [],
+        status: 'Error', // Start assuming error
+        evaluatorAgentId: BACKEND_EVALUATOR_ID,
+        timestamp: new Date().toISOString(),
+    };
 
     try {
-        console.log(`${logPrefix} Check existing payout log...`);
-        const existingPayout = await getObjectData(getPayoutKey(requestContext));
-        if (existingPayout) {
-            console.log(`${logPrefix} Payout log EXISTS. Skip payout.`);
-            isProcessingPayoutMap.delete(requestContext);
+        // 1. Check Question Timestamp & Wait Time
+        const questionDataForTimestamp = await getObjectData<QuestionData>(getQuestionKey(requestContext));
+        if (!questionDataForTimestamp?.timestamp) {
+            console.log(`[Eval] No question timestamp for context: ${requestContext}, skipping evaluation.`);
+            isEvaluatingMap.delete(requestContext);
+            return; // Exit cleanly, not an error state for evaluation itself
+        }
+        const elapsed = Date.now() - new Date(questionDataForTimestamp.timestamp).getTime();
+        if (elapsed < EVALUATION_WAIT_TIME_MS) {
+            console.log(`[Eval] Not enough time elapsed since question for context: ${requestContext} (${Math.round(elapsed / 1000)}s / ${Math.round(EVALUATION_WAIT_TIME_MS / 1000)}s). Skipping.`);
+            isEvaluatingMap.delete(requestContext);
+            return; // Exit cleanly
+        }
+
+        // 2. Check if Evaluation Already Done
+        const existingEval = await getObjectData<EvaluationResult>(getEvaluationKey(requestContext));
+        if (existingEval) {
+            console.log(`[Eval] Evaluation already exists for context: ${requestContext} (Status: ${existingEval.status}). Skipping.`);
+            isEvaluatingMap.delete(requestContext);
+            return; // Exit cleanly
+        }
+
+        // 3. Fetch Question Content (Needed for LLM)
+        // Use the questionData we already fetched for the timestamp check
+        const questionData = questionDataForTimestamp;
+        const content = await fetchContentByCid(questionData.cid); // Fetch content associated with the question
+        if (!content) {
+            console.error(`[Eval] Failed to fetch question content (CID: ${questionData.cid}) for context: ${requestContext}. Cannot evaluate.`);
+            // Log error state evaluation and exit
+            evaluationOutput.status = 'Error';
+            evaluationOutput.results = [{ // Add a placeholder error result if needed
+                answerKey: 'N/A', answeringAgentId: '0x', confidence: 0, evaluation: 'Error', explanation: 'Failed to fetch question content.', fulfillmentUID: null, validationUID: null
+            }];
+            await recallLogEvaluationResult(evaluationOutput, requestContext);
+            isEvaluatingMap.delete(requestContext);
             return;
         }
-        console.log(`${logPrefix} No existing payout log. Proceeding.`);
-        console.log(`${logPrefix} Check evaluation status: ${evaluationData.status}`);
-        if (evaluationData.status !== 'PendingPayout') {
-            console.log(`${logPrefix} Eval status not PendingPayout. Skip payout.`);
-            isProcessingPayoutMap.delete(requestContext);
+
+        // 4. List Answers from Recall
+        const recall = await getRecallClient();
+        const bucketAddr = await findLogBucketAddressOrFail(recall);
+        const answerPrefix = getAnswersPrefix(requestContext);
+        console.log(`[Eval] Querying Recall bucket ${bucketAddr} for answers with prefix: ${answerPrefix}`);
+        const { result: answersResult } = await recall.bucketManager().query(bucketAddr, { prefix: answerPrefix });
+        const allAnswerKeys = (answersResult?.objects || [])
+            .map((o: any) => o.key as string | undefined) // Get keys
+            .filter((k?: string): k is string => !!k && k.endsWith('.json')); // Filter valid keys
+
+        console.log(`[Eval] Found ${allAnswerKeys.length} potential answer keys for context ${requestContext}.`);
+
+        if (allAnswerKeys.length === 0) {
+            console.log(`[Eval] No answers found for context: ${requestContext}. Logging status as NoValidAnswers.`);
+            evaluationOutput.status = 'NoValidAnswers';
+            await recallLogEvaluationResult(evaluationOutput, requestContext);
+            isEvaluatingMap.delete(requestContext);
             return;
         }
 
-        payoutStatus.stage = 'FetchQuestionData';
-        console.log(`${logPrefix} Fetching question data...`);
-        const { questionData } = await getQuestionAndContent(requestContext);
-        if (!questionData?.cid) {
-            throw new Error("Missing question data/CID.");
-        }
-        const evidenceCid = questionData.cid;
-        console.log(
-            `${logPrefix} Got question data. Evidence CID: ${evidenceCid.substring(0, 10)}`
-        );
-        let submittedCount = 0;
-        payoutStatus.correctAnswers = evaluationData.results.filter((r) => r.evaluation === 'Correct').length;
-        payoutStatus.processedAgents = evaluationData.results.length;
-        console.log(`${logPrefix} Processing ${payoutStatus.correctAnswers} correct answers.`);
-
-        for (const result of evaluationData.results) {
-            if (isShuttingDown) throw new Error('Shutdown signal');
-            if (result.evaluation === 'Correct') {
-                const answeringAgentId = result.answeringAgentId;
-                console.log(`${logPrefix} Processing Correct answer Agent: ${answeringAgentId.substring(0, 10)}`);
-                payoutStatus.stage = `ValidateAddress_${answeringAgentId.substring(0, 6)}`;
-                if (!isAddress(answeringAgentId)) {
-                    console.warn(`${logPrefix} Invalid Addr ${answeringAgentId}. Skip.`);
-                    fvmErrors++;
-                    continue;
-                }
-                const payoutAddress = getAddress(answeringAgentId);
-                try {
-                    payoutStatus.stage = `RegisterAgent_${payoutAddress.substring(0, 6)}`;
-                    console.log(`${logPrefix} Registering Agent ${payoutAddress}...`);
-                    const registerTx = await registerAgent(answeringAgentId, payoutAddress);
-                    if (registerTx)
-                        payoutStatus.txHashes[`register_${payoutAddress.substring(0, 6)}`] = registerTx;
-                } catch (regError: any) {
-                    console.error(`${logPrefix} Register FAIL ${answeringAgentId}:`, regError.message);
-                    fvmErrors++;
-                    continue;
-                }
-                try {
-                    payoutStatus.stage = `SubmitResult_${payoutAddress.substring(0, 6)}`;
-                    const confidence = result.confidence ?? 1.0;
-                    const confidenceScaled = Math.max(0, Math.min(100, Math.round(confidence * 100)));
-                    console.log(`${logPrefix} Submitting FVM Agent ${payoutAddress} Conf ${confidenceScaled}...`);
-                    const submitTx = await submitVerificationResult(
-                        requestContext,
-                        answeringAgentId,
-                        'Correct',
-                        confidenceScaled,
-                        evidenceCid
-                    );
-                    if (submitTx) {
-                        payoutStatus.txHashes[`submit_${payoutAddress.substring(0, 6)}`] = submitTx;
-                        submittedCount++;
-                    } else {
-                        console.error(`${logPrefix} Submit FAIL ${payoutAddress}.`);
-                        fvmErrors++;
-                    }
-                } catch (submitError: any) {
-                    console.error(`${logPrefix} Submit FAIL ${payoutAddress}:`, submitError.message);
-                    fvmErrors++;
-                }
-            }
-        }
-        payoutStatus.submissionsSent = submittedCount;
-        payoutStatus.fvmErrors = fvmErrors;
-        console.log(`${logPrefix} FVM submissions done: ${submittedCount} sent, ${fvmErrors} errors.`);
-
-        if (submittedCount > 0 && fvmErrors === 0) {
+        // 5. Evaluate Each Answer with LLM
+        const excerpt = truncateText(content, 3500); // Truncate content for LLM context limit
+        const evaluationPromises = allAnswerKeys.map(async (answerKey: any): Promise<EvaluationResult['results'][0] | null> => {
             try {
-                payoutStatus.stage = `TriggerAggregation`;
-                console.log(`${logPrefix} Triggering Aggregation...`);
-                const aggregateTx = await triggerAggregation(requestContext);
-                if (aggregateTx) {
-                    payoutStatus.txHashes[`aggregate`] = aggregateTx;
-                    payoutStatus.success = true;
-                    payoutStatus.message = `Processed ${submittedCount}, triggered aggregation.`;
-                } else {
-                    payoutStatus.success = false;
-                    payoutStatus.message = `Processed ${submittedCount}, FAILED trigger aggregation.`;
+                const answerData = await getObjectData<AnswerData>(answerKey);
+                if (!answerData?.answer || !answerData?.answeringAgentId || !answerData?.fulfillmentUID) {
+                    console.warn(`[Eval] Skipping answer ${answerKey}: missing required data (answer, agentId, fulfillmentUID).`);
+                    return null;
                 }
-            } catch (aggError: any) {
-                payoutStatus.success = false;
-                payoutStatus.message = `Error triggering aggregation: ${aggError.message}`;
-                console.error(`${logPrefix} Aggregation Error:`, aggError.message);
+
+                // Ensure agent ID is checksummed
+                const agentId = getAddress(answerData.answeringAgentId);
+
+                console.log(`[Eval] Evaluating answer from agent ${agentId} (key: ${answerKey})...`);
+                const llmEval: LLMEvaluationResult = await evaluateAnswerWithLLM(
+                    questionData.question,
+                    answerData.answer,
+                    excerpt,
+                    requestContext,
+                    BACKEND_EVALUATOR_ID // Pass evaluator ID for context/logging in LLM service if needed
+                );
+                console.log(`[Eval] LLM Result for ${answerKey}: ${llmEval.evaluation}, Confidence: ${llmEval.confidence}`);
+
+                // *** Prepare the result object for EvaluationResult ***
+                // *** Includes the NEW validationUID field ***
+                return {
+                    answeringAgentId: agentId,
+                    answerKey: answerKey,
+                    evaluation: llmEval.evaluation,
+                    confidence: llmEval.confidence,
+                    explanation: llmEval.explanation!,
+                    fulfillmentUID: answerData.fulfillmentUID, // The AnswerStatement UID
+                    validationUID: answerData.validationUID ?? null, // <<< The ZKPValidator UID
+                };
+            } catch (evalError: any) {
+                console.error(`[Eval] Error processing answer ${answerKey}: ${evalError.message}`);
+                return null; // Skip this answer if processing fails
             }
-        } else if (fvmErrors > 0) {
-            payoutStatus.success = false;
-            payoutStatus.message = `Processed ${submittedCount}, ${fvmErrors} FVM errors. Aggregation skipped.`;
-        } else {
-            payoutStatus.success = true;
-            payoutStatus.message = "No correct answers for payout.";
+        });
+
+        // 6. Aggregate Results and Determine Status
+        const completedEvaluationsRaw = await Promise.all(evaluationPromises);
+        const completedEvaluations = completedEvaluationsRaw.filter((r): r is EvaluationResult['results'][0] => r !== null);
+
+        evaluationOutput.results = completedEvaluations;
+
+        // Determine final status based on *valid* 'Correct' evaluations
+        const hasCorrectAndValidatable = completedEvaluations.some(
+            (r) => r.evaluation === 'Correct' && !!r.validationUID // <<< Check if 'Correct' AND has a validation UID
+        );
+
+        evaluationOutput.status = hasCorrectAndValidatable ? 'PendingPayout' : 'NoValidAnswers';
+
+        console.log(`[Eval] Evaluation complete for context ${requestContext}. Status: ${evaluationOutput.status}. ${completedEvaluations.length} answers processed.`);
+        if (!hasCorrectAndValidatable && completedEvaluations.some(r => r.evaluation === 'Correct')) {
+            console.warn(`[Eval] Found 'Correct' answers for ${requestContext}, but none had a validationUID. Check agent logs.`);
         }
-        console.log(`${logPrefix} Aggregation outcome: Success=${payoutStatus.success}, Msg=${payoutStatus.message}`);
-        console.log(`${logPrefix} Updating evaluation status to ${payoutStatus.success ? 'PayoutComplete' : 'Error'}...`);
-        evaluationData.status = payoutStatus.success ? 'PayoutComplete' : 'Error';
-        await recallLogEvaluationResult(evaluationData, requestContext);
+
+
+        // 7. Log Evaluation Result to Recall
+        // (Optional: Add on-chain anchor logic here if desired using StringResultStatement - currently commented out)
+        /*
+        try {
+            // Example: hash the evaluationOutput or get its CID
+            // const evalHash = '0x...'; // Replace with actual hash/CID
+            // await fvmContractService.anchorEvaluation(requestContext, evalHash); // Assuming function exists
+        } catch (anchorErr: any) {
+            console.error(`[Eval] WARNING: Failed to anchor evaluation result on-chain for ${requestContext}: ${anchorErr.message}`);
+        }
+        */
+
+        await recallLogEvaluationResult(evaluationOutput, requestContext);
+        console.log(`[Eval] Wrote evaluation results to Recall for context ${requestContext}`);
+
     } catch (error: any) {
-        const errorMessage = error.message || String(error);
-        console.error(`${logPrefix} CATCH BLOCK: Unhandled payout error: ${errorMessage}`);
+        console.error(`[Eval] UNCAUGHT ERROR during evaluation for context ${requestContext}:`, error);
+        evaluationOutput.status = 'Error'; // Ensure status reflects error
+        try {
+            // Attempt to log the error state
+            await recallLogEvaluationResult(evaluationOutput, requestContext);
+        } catch (logErr: any) {
+            console.error(`[Eval] FATAL: Could not log evaluation error state for context ${requestContext}:`, logErr);
+        }
+    } finally {
+        isEvaluatingMap.delete(requestContext); // Release lock
+        console.log(`[Eval] ==== evaluateAnswers END for context: ${requestContext} ====`);
+    }
+}
+
+
+async function processPayout(evaluationData: EvaluationResult): Promise<void> {
+    const requestContext = evaluationData.requestContext;
+    console.log(`[Payout] ========== PROCESS PAYOUT BEGIN for context: ${requestContext} ==========`);
+
+    // Prevent concurrent processing for the same context
+    if (isProcessingPayoutMap.get(requestContext)) {
+        console.log(`[Payout] Already processing payout for ${requestContext}, skipping.`);
+        return;
+    }
+    isProcessingPayoutMap.set(requestContext, true); // Set lock
+
+    // Initialize payout status log - This object will be updated throughout the process
+    let payoutStatus: PayoutStatusData = {
+        requestContext,
+        stage: 'Start', // Initial stage
+        success: false, // Assume failure until proven otherwise
+        message: 'Payout initiated.',
+        processedAgents: evaluationData.results.length, // Total answers evaluated
+        correctAnswers: evaluationData.results.filter(r => r.evaluation === 'Correct').length, // Correct per LLM
+        submissionsSent: 0, // Successful on-chain collectPayment calls
+        fvmErrors: 0, // Errors during on-chain collectPayment calls
+        txHashes: {}, // Record of transaction hashes or errors per agent
+        payoutAgentId: BACKEND_EVALUATOR_ID, // ID of this backend service instance
+        payoutTimestamp: new Date().toISOString(), // Initial timestamp, will be updated
+    };
+
+    // Local counters for use within the main try block
+    let fvmErrorsCountInTry = 0;
+    let submittedCountInTry = 0;
+
+    try {
+        // === Step 1: Pre-checks ===
+
+        // Check if payout log already exists (meaning process completed or failed definitively before)
+        const existingPayout = await getObjectData<PayoutStatusData>(getPayoutKey(requestContext));
+        if (existingPayout) {
+            console.log(`[Payout] Payout log already exists for context: ${requestContext} (Stage: ${existingPayout.stage}). Skipping redundant processing.`);
+            isProcessingPayoutMap.delete(requestContext); // Release lock
+            return; // Exit
+        }
+
+        // Check if evaluation status allows payout attempt
+        if (evaluationData.status !== 'PendingPayout') {
+            console.log(`[Payout] Evaluation status is '${evaluationData.status}' (not 'PendingPayout') for context: ${requestContext}. Skipping payout attempt.`);
+            // If status indicates no valid answers or an error occurred during evaluation,
+            // finalize the payout log to reflect this, but don't attempt payouts.
+            if (evaluationData.status === 'NoValidAnswers' || evaluationData.status === 'Error') {
+                await finalizePayoutLog(requestContext, evaluationData.status);
+            }
+            isProcessingPayoutMap.delete(requestContext); // Release lock
+            return; // Exit
+        }
+        payoutStatus.stage = 'ChecksPassed'; // Update stage
+
+        // === Step 2: Get Payment Information ===
+        console.log(`[Payout] Loading question data for context: ${requestContext}...`);
+        const { questionData } = await getQuestionAndContent(requestContext); // Assumes this helper exists
+        if (!questionData?.paymentUID) {
+            // This is a fatal error for the payout process
+            throw new Error(`Missing paymentUID in questionData for context: ${requestContext}. Cannot proceed with payout.`);
+        }
+        const paymentUID = questionData.paymentUID; // The UID of the ERC20PaymentStatement
+        console.log(`[Payout] Found Payment Statement UID: ${paymentUID}`);
+        payoutStatus.stage = 'PaymentUIDRetrieved';
+
+        // === Step 3: Filter Eligible Payout Candidates ===
+        // An answer is eligible if:
+        // 1. The LLM marked it as 'Correct'.
+        // 2. The agent successfully ran ZKP validation and stored the validationUID.
+        const eligibleResults = evaluationData.results.filter(result =>
+            result.evaluation === 'Correct' && !!result.validationUID // Check both conditions
+        );
+
+        if (eligibleResults.length === 0) {
+            console.log(`[Payout] No eligible answers found for payout for context: ${requestContext} (LLM 'Correct' AND has validationUID). Finalizing as NoValidAnswers.`);
+            payoutStatus.message = "No eligible answers found for payout (require LLM 'Correct' and ZKP Validation UID).";
+            payoutStatus.stage = 'NoEligibleAgents';
+            await finalizePayoutLog(requestContext, 'NoValidAnswers'); // Log specific final status
+
+            // Update evaluation status to reflect this outcome definitively
+            evaluationData.status = 'NoValidAnswers'; // Or a new status like 'PayoutNotAttempted'
+            await recallLogEvaluationResult(evaluationData, requestContext);
+
+            isProcessingPayoutMap.delete(requestContext); // Release lock
+            return; // Exit
+        }
+
+        console.log(`[Payout] Found ${eligibleResults.length} eligible answer(s) for payout for context ${requestContext}.`);
+        payoutStatus.stage = 'EligibleAgentsIdentified';
+
+
+        // === Step 4: Attempt On-Chain Payouts ===
+        console.log(`[Payout] Attempting payouts for ${eligibleResults.length} agent(s)...`);
+        payoutStatus.stage = 'AttemptingOnchainPayouts';
+
+        for (const [index, result] of eligibleResults.entries()) {
+            const agentId = result.answeringAgentId;
+            // We've already filtered, so validationUID is guaranteed to be a non-null string here
+            const validationUID = result.validationUID!;
+
+            console.log(`[Payout] Processing eligible result #${index + 1}/${eligibleResults.length}: Agent=${agentId}, ZKP_ValidationUID=${validationUID}`);
+
+            try {
+                // Call the FVM service to execute the collectPayment transaction
+                // Pass the PaymentUID (the offer) and the ValidationUID (the proof of fulfillment)
+                console.log(`[Payout] Calling fvmContractService.payoutToAgentOnchain(paymentUID: ${paymentUID}, fulfillmentUID: ${validationUID})`);
+                const txResult = await payoutToAgentOnchain(paymentUID, validationUID);
+
+                // Record successful transaction
+                payoutStatus.txHashes[`payout_${agentId.substring(0, 8)}`] = txResult.hash;
+                submittedCountInTry++; // Increment success counter
+                console.log(`[Payout] ✅ Payout TX successful for Agent ${agentId}. Hash: ${txResult.hash}`);
+
+            } catch (payError: any) {
+                // Record failed transaction attempt
+                fvmErrorsCountInTry++; // Increment error counter
+                const errorMessage = payError?.message || String(payError);
+                payoutStatus.txHashes[`error_${agentId.substring(0, 8)}_${fvmErrorsCountInTry}`] = `Failed: ${errorMessage}`;
+                console.error(`[Payout] ❌ FVM PAYOUT ERROR for Agent ${agentId} (ValidationUID: ${validationUID}):`, errorMessage);
+                // Log the error but continue to the next agent
+            }
+        } // End of loop through eligible agents
+
+        // === Step 5: Finalize Payout Status After Attempts ===
+        payoutStatus.submissionsSent = submittedCountInTry;
+        payoutStatus.fvmErrors = fvmErrorsCountInTry;
+        // Determine overall success: At least one payout succeeded AND there were NO errors.
+        payoutStatus.success = (submittedCountInTry > 0 && fvmErrorsCountInTry === 0);
+        payoutStatus.stage = payoutStatus.success ? 'PayoutComplete' : 'PayoutAttemptedWithErrors';
+        payoutStatus.message = payoutStatus.success
+            ? `Payout successful for ${submittedCountInTry} agent(s).`
+            : `Payout attempted for ${submittedCountInTry} agent(s) with ${fvmErrorsCountInTry} FVM error(s). Check txHashes for details.`;
+
+        console.log(`[Payout] Finished processing payouts for context ${requestContext}. Success: ${payoutStatus.success}, Sent: ${submittedCountInTry}, Errors: ${fvmErrorsCountInTry}`);
+
+        // Update the EvaluationResult status based on the payout outcome
+        // If payout was fully successful, mark evaluation as PayoutComplete.
+        // If there were errors during payout, mark evaluation as Error.
+        evaluationData.status = payoutStatus.success ? 'PayoutComplete' : 'Error';
+        console.log(`[Payout] Updating evaluation status for ${requestContext} to: ${evaluationData.status}`);
+        await recallLogEvaluationResult(evaluationData, requestContext);
+
+    } catch (error: any) {
+        // Catch errors from steps *before* the payout loop (e.g., fetching paymentUID)
         payoutStatus.success = false;
-        payoutStatus.message = errorMessage;
-        payoutStatus.fvmErrors = fvmErrors;
-        if (evaluationData && evaluationData.status !== 'Error') {
+        payoutStatus.stage = 'FatalError'; // Indicate a critical failure before/during setup
+        payoutStatus.message = `FATAL ERROR during payout process setup: ${error?.message || String(error)}`;
+        // Assign fvmErrorsCountInTry which would be 0 if error happened before loop
+        payoutStatus.fvmErrors = fvmErrorsCountInTry;
+        console.error(`[Payout] ❌ FATAL EXCEPTION during payout process for context ${requestContext}: ${payoutStatus.message}`, error);
+
+        // Attempt to update evaluation status to Error if it wasn't already
+        if (evaluationData?.status && evaluationData.status !== 'Error') {
             try {
                 evaluationData.status = 'Error';
                 await recallLogEvaluationResult(evaluationData, requestContext);
-            } catch {
-                /* ignore */
+            } catch (logErr: any) {
+                console.error(`[Payout] Failed to log evaluation status update after fatal error for ${requestContext}: ${logErr.message}`);
             }
         }
     } finally {
-        payoutStatus.payoutTimestamp = new Date().toISOString();
-        console.log(`${logPrefix} Attempting final payout status log...`);
-        await recallLogPayoutStatus(payoutStatus, requestContext);
-        isProcessingPayoutMap.delete(requestContext);
-        console.log(`[EvalPay DEBUG] <=== EXIT processPayout | Ctx: ${shortCtx} | Final Success: ${payoutStatus.success}`);
+        // === Step 6: Log Final Payout Status (Always Runs) ===
+        payoutStatus.payoutTimestamp = new Date().toISOString(); // Set final timestamp
+        console.log(`[Payout] Logging final payout status for context ${requestContext}:`, JSON.stringify(payoutStatus, null, 2));
+        try {
+            // Log the complete PayoutStatusData object to Recall
+            await recallLogPayoutStatus(payoutStatus, requestContext);
+        } catch (logErr: any) {
+            console.error(`[Payout] FATAL: Could not log final payout status to Recall for context ${requestContext}: ${logErr.message}`);
+            // This is a critical failure in logging the outcome.
+        }
+        isProcessingPayoutMap.delete(requestContext); // Release lock IMPORTANT: ensure this runs
+        console.log(`[Payout] ========== PROCESS PAYOUT END for context: ${requestContext} ==========`);
     }
 }
 
-/** Polling function for evaluations. */
+// == Polling Loops (Unchanged from your provided code) ==
+
 async function pollForPendingEvaluations(): Promise<void> {
-    const pollId = `EvalPoll-${Date.now() % 10000}`;
     if (isShuttingDown) return;
+    // Avoid polling if an evaluation is already running (simple lock)
     if (Array.from(isEvaluatingMap.values()).some((status) => status === true)) {
+        console.log("[EvalPoll] Evaluation in progress, delaying next poll.");
         if (!isShuttingDown) {
             evaluationPollTimer = setTimeout(pollForPendingEvaluations, EVALUATION_POLLING_INTERVAL_MS);
         }
         return;
     }
-    console.log(`[EvalPay DEBUG] === Starting ${pollId} Evaluation Check ===`);
+    console.log("[EvalPoll] Checking for pending evaluations...");
     try {
-        const questionJobs = await getPendingJobs(CONTEXT_DATA_PREFIX);
-        console.log(`[EvalPay DEBUG - ${pollId}] Found ${questionJobs.length} potential question contexts.`);
-        if (questionJobs.length > 0) {
-            for (const jobInfo of questionJobs) {
-                if (isShuttingDown) break;
-                const contextMatch = jobInfo.key.match(/reqs\/(req_[^/]+)\/question\.json$/);
-                const requestContext = contextMatch ? contextMatch[1] : null;
-                if (!requestContext) {
-                    console.warn(`[EvalPay DEBUG - ${pollId}] Skip: Could not extract context from key: ${jobInfo.key}`);
-                    continue;
-                }
-                const shortCtx = requestContext.substring(0, 10);
-                console.log(`[EvalPay DEBUG - ${pollId}] Checking context: ${shortCtx}`);
-                if (isEvaluatingMap.get(requestContext)) {
-                    console.log(`[EvalPay DEBUG - ${pollId}] Skip: Already evaluating Ctx: ${shortCtx}.`);
-                    continue;
-                }
-                const evaluationKey = getEvaluationKey(requestContext);
-                const payoutKey = getPayoutKey(requestContext);
-                console.log(`[EvalPay DEBUG - ${pollId}] Checking existing logs for Ctx: ${shortCtx}`);
-                const [existingEval, existingPayout] = await Promise.all([
-                    getObjectData(evaluationKey),
-                    getObjectData(payoutKey),
-                ]);
-                if (!existingEval && !existingPayout) {
-                    console.log(
-                        `[EvalPay DEBUG - ${pollId}] No eval/payout logs exist for Ctx: ${shortCtx}. Checking answers...`
-                    );
-                    const recall = await getRecallClient();
-                    const bucketAddr = await findLogBucketAddressOrFail(recall);
-                    const answerPrefix = getAnswersPrefix(requestContext);
-                    const { result: answersResult } = await recall.bucketManager().query(bucketAddr, {
-                        prefix: answerPrefix,
-                        limit: 1,
-                    });
-                    const hasAnswers = answersResult?.objects?.length > 0;
-                    console.log(`[EvalPay DEBUG - ${pollId}] Answer check for Ctx: ${shortCtx}. Found: ${hasAnswers}`);
-                    if (hasAnswers) {
-                        console.log(`[EvalPay DEBUG - ${pollId}] Triggering evaluateAnswers for Ctx: ${shortCtx}`);
-                        evaluateAnswers(requestContext);
-                    } else {
-                        console.log(`[EvalPay DEBUG - ${pollId}] No answers yet for Ctx: ${shortCtx}.`);
-                    }
+        const questionJobs = await getPendingJobs(CONTEXT_DATA_PREFIX); // Get keys matching prefix
+        console.log(`[EvalPoll] Found ${questionJobs.length} potential question jobs.`);
+        for (const jobInfo of questionJobs) {
+            if (isShuttingDown) break;
+            // Extract context ID, e.g., "req_..."
+            const contextMatch = jobInfo.key.match(/reqs\/(req_[^/]+)\/question\.json$/);
+            const requestContext = contextMatch ? contextMatch[1] : null;
+            if (!requestContext || isEvaluatingMap.has(requestContext)) continue; // Skip if no context or already processing
+
+            // Check timestamp requirement
+            const questionData = await getObjectData<QuestionData>(getQuestionKey(requestContext));
+            if (!questionData?.timestamp) {
+                console.log(`[EvalPoll] Skipping ${requestContext}: No timestamp.`);
+                continue;
+            }
+            const minTime = new Date(questionData.timestamp).getTime() + EVALUATION_WAIT_TIME_MS;
+            if (Date.now() < minTime) {
+                console.log(`[EvalPoll] Skipping ${requestContext}: Wait time not elapsed.`);
+                continue;
+            }
+
+            // Check if evaluation or payout already done
+            const evaluationKey = getEvaluationKey(requestContext);
+            const payoutKey = getPayoutKey(requestContext);
+            const [existingEval, existingPayout] = await Promise.all([
+                getObjectData(evaluationKey),
+                getObjectData(payoutKey),
+            ]);
+
+            if (!existingEval && !existingPayout) {
+                // Check if any answers exist before triggering evaluation
+                const recall = await getRecallClient();
+                const bucketAddr = await findLogBucketAddressOrFail(recall);
+                const answerPrefix = getAnswersPrefix(requestContext);
+                const { result: answersResult } = await recall.bucketManager().query(bucketAddr, {
+                    prefix: answerPrefix,
+                    limit: 1, // Just need to know if at least one exists
+                });
+                const hasAnswers = answersResult?.objects?.length > 0;
+
+                if (hasAnswers) {
+                    console.log(`[EvalPoll] Triggering evaluation for ${requestContext}.`);
+                    await evaluateAnswers(requestContext); // No await needed if we want polls to continue independently
                 } else {
-                    console.log(
-                        `[EvalPay DEBUG - ${pollId}] Skip: Eval (${!!existingEval}) or Payout (${!!existingPayout}) exists for Ctx: ${shortCtx}.`
-                    );
+                    console.log(`[EvalPoll] Skipping ${requestContext}: No answers found yet.`);
                 }
+            } else {
+                console.log(`[EvalPoll] Skipping ${requestContext}: Evaluation or Payout already exists.`);
             }
         }
-        console.log(`[EvalPay DEBUG] === Finished ${pollId} Evaluation Check ===`);
     } catch (error: any) {
-        console.error(`[EvalPay DEBUG - ${pollId}] Error during eval poll:`, error.message);
+        console.error(`[EvalPoll] Error during polling for evaluations:`, error.message);
     } finally {
         if (!isShuttingDown) {
             evaluationPollTimer = setTimeout(pollForPendingEvaluations, EVALUATION_POLLING_INTERVAL_MS);
@@ -484,105 +508,112 @@ async function pollForPendingEvaluations(): Promise<void> {
     }
 }
 
-/** Polling function for payouts. (Handles NoValidAnswers/Error states) */
 async function pollForPendingPayouts(): Promise<void> {
-    const pollId = `PayoutPoll-${Date.now() % 10000}`;
-    if (isShuttingDown) return;
+    // Exit if the service is shutting down
+    if (isShuttingDown) {
+        console.log("[PayoutPoll] Shutting down, stopping payout poll.");
+        return;
+    }
+
+    // Avoid concurrent polling runs if one is already active (simple lock)
     if (Array.from(isProcessingPayoutMap.values()).some((status) => status === true)) {
+        console.log("[PayoutPoll] Payout processing in progress, delaying next poll cycle.");
+        // Schedule next poll and exit current one
         if (!isShuttingDown) {
             payoutPollTimer = setTimeout(pollForPendingPayouts, PAYOUT_POLLING_INTERVAL_MS);
         }
         return;
     }
-    console.log(`[EvalPay DEBUG] === Starting ${pollId} Payout Check ===`);
 
+    console.log("[PayoutPoll] Checking for pending payouts...");
     try {
+        // Initialize Recall client and find the log bucket address
         const recall = await getRecallClient();
         const bucketAddr = await findLogBucketAddressOrFail(recall);
-        console.log(`[EvalPay DEBUG - ${pollId}] Querying contexts with prefix: ${CONTEXT_DATA_PREFIX}`);
-        const { result: contextListResult } = await recall.bucketManager().query(bucketAddr, {
-            prefix: CONTEXT_DATA_PREFIX,
-            delimiter: '/',
+
+        // --- Query Strategy: List all keys under the base prefix and filter ---
+        console.log(`[PayoutPoll] Querying Recall bucket ${bucketAddr} for evaluation files with prefix: ${CONTEXT_DATA_PREFIX}`);
+        const { result: listResult } = await recall.bucketManager().query(bucketAddr, {
+            prefix: CONTEXT_DATA_PREFIX, // Start search from base context prefix 'reqs/'
+            delimiter: '' // List all keys flatly under the prefix
         });
-        const contextPrefixes: string[] = [
-            ...new Set((contextListResult?.commonPrefixes as string[] | undefined) || []),
-        ];
-        console.log(`[EvalPay DEBUG - ${pollId}] Found ${contextPrefixes.length} potential context prefixes.`);
 
-        if (contextPrefixes.length > 0) {
-            for (const contextPrefix of contextPrefixes) {
-                if (isShuttingDown) break;
-                const parts = contextPrefix.replace(/\/$/, '').split('/');
-                const requestContext = parts.pop();
-                if (!requestContext || !requestContext.startsWith('req_')) {
-                    console.warn(`[EvalPay DEBUG - ${pollId}] Invalid context prefix: ${contextPrefix}`);
-                    continue;
-                }
-                const shortCtx = requestContext.substring(0, 10);
-                console.log(`[EvalPay DEBUG - ${pollId}] Checking context: ${shortCtx}`);
+        // Filter the results to get only keys ending with '/evaluation.json'
+        const evaluationKeys = (listResult?.objects || [])
+             .map((o: any) => o.key as string | undefined) // Get the key string
+             .filter((k?: string): k is string => !!k && k.endsWith('/evaluation.json')); // Filter
 
-                if (isProcessingPayoutMap.get(requestContext)) {
-                    console.log(`[EvalPay DEBUG - ${pollId}] Skip: Already processing payout Ctx: ${shortCtx}.`);
-                    continue;
-                }
+        console.log(`[PayoutPoll] Found ${evaluationKeys.length} potential evaluation files to check.`);
 
-                const payoutKey = getPayoutKey(requestContext);
-                const existingPayout = await getObjectData(payoutKey);
-                if (existingPayout) {
-                    console.log(`[EvalPay DEBUG - ${pollId}] Skip: Payout log exists for Ctx: ${shortCtx}.`);
-                    continue;
-                }
+        // Process each found evaluation file
+        for (const evaluationKey of evaluationKeys) {
+            if (isShuttingDown) break; // Check shutdown status within loop
 
-                const evaluationKey = getEvaluationKey(requestContext);
-                console.log(`[EvalPay DEBUG - ${pollId}] Fetching evaluation data: ${evaluationKey}`);
-                const evaluationData = await getObjectData<EvaluationResult>(evaluationKey); // Fetch evaluation data
+            // Extract context ID from the key (e.g., "req_12345")
+            const contextMatch = evaluationKey.match(/reqs\/(req_[^/]+)\/evaluation\.json$/);
+            const requestContext = contextMatch ? contextMatch[1] : null;
 
-                if (!evaluationData) {
-                    console.log(`[EvalPay DEBUG - ${pollId}] Skip: No evaluation data found for Ctx: ${shortCtx}.`);
-                    continue; // Cannot proceed without evaluation data
-                }
-
-                // --- Handle based on evaluation status ---
-                if (evaluationData.status === 'PendingPayout') {
-                    console.log(
-                        `[EvalPay DEBUG - ${pollId}] ✅ Found PendingPayout for Ctx: ${shortCtx}. Triggering processPayout...`
-                    );
-                    processPayout(evaluationData); // Fire and forget for concurrency
-                } else if (
-                    evaluationData.status === 'NoValidAnswers' ||
-                    evaluationData.status === 'Error'
-                ) {
-                    console.log(
-                        `[EvalPay DEBUG - ${pollId}]  Detected terminal evaluation status '${evaluationData.status}' for Ctx: ${shortCtx}. Triggering finalizePayoutLog...`
-                    );
-                    // Directly log the final payout status indicating no payout occurred
-                    finalizePayoutLog(requestContext, evaluationData.status); // Fire and forget
-                } else if (evaluationData.status === 'PayoutComplete') {
-                    // This case should ideally be caught by the existingPayout check, but handle defensively
-                    console.log(
-                        `[EvalPay DEBUG - ${pollId}] Eval status already PayoutComplete for Ctx: ${shortCtx}. Ensure payout log exists or finalize.`
-                    );
-                    // Optionally call finalizePayoutLog if payout log is missing but eval is complete
-                    // finalizePayoutLog(requestContext, 'Error'); // Log as error if payout log missing? Or ignore.
-                } else {
-                    // Log unexpected status, but don't error out the whole polling loop
-                    console.warn(
-                        `[EvalPay DEBUG - ${pollId}] Unexpected eval status '${evaluationData.status}' for Ctx: ${shortCtx}. Skip payout.`
-                    );
-                }
+            // Skip if context couldn't be extracted or if this context is already being processed
+            if (!requestContext || isProcessingPayoutMap.has(requestContext)) {
+                 if (!requestContext) console.warn(`[PayoutPoll] Could not extract context from key: ${evaluationKey}`);
+                 // else console.log(`[PayoutPoll] Skipping ${requestContext}, already processing.`);
+                 continue;
             }
-        }
-        console.log(`[EvalPay DEBUG] === Finished ${pollId} Payout Check ===`);
+
+            // Check if a payout log already exists for this context (meaning payout already finished/failed definitively)
+            const payoutKey = getPayoutKey(requestContext);
+            const existingPayout = await getObjectData<PayoutStatusData>(payoutKey);
+            if (existingPayout) {
+                 // console.log(`[PayoutPoll] Skipping ${requestContext}: Payout log already exists (Stage: ${existingPayout.stage}).`);
+                 continue; // Already processed
+            }
+
+            // Fetch the evaluation data object
+            const evaluationData = await getObjectData<EvaluationResult>(evaluationKey);
+            if (!evaluationData) {
+                 console.warn(`[PayoutPoll] Skipping ${requestContext}: Failed to fetch evaluation data from key ${evaluationKey}.`);
+                 continue; // Cannot process without evaluation data
+            }
+
+            // --- Decide action based on evaluation status ---
+            if (evaluationData.status === 'PendingPayout') {
+                // If status indicates payout is ready, trigger the payout process
+                console.log(`[PayoutPoll] Triggering payout process for ${requestContext} (Status: PendingPayout).`);
+                // Call processPayout (don't await if polling should continue independently)
+                processPayout(evaluationData).catch(err => {
+                     // Catch errors specifically from processPayout to prevent crashing the poll loop
+                     console.error(`[PayoutPoll] Error during async processPayout call for ${requestContext}: ${err.message}`);
+                });
+            } else if (
+                evaluationData.status === 'NoValidAnswers' ||
+                evaluationData.status === 'Error'
+            ) {
+                // If evaluation ended with no valid answers or an error,
+                // ensure a final payout log is created to mark the end state.
+                console.log(`[PayoutPoll] Finalizing payout log for ${requestContext} with terminal evaluation status: ${evaluationData.status}.`);
+                // Call finalizePayoutLog (await is fine here as it's just logging)
+                await finalizePayoutLog(requestContext, evaluationData.status);
+            } else {
+                 // Log other statuses found (e.g., PayoutComplete, PendingEvaluation) - no action needed here
+                 // console.log(`[PayoutPoll] Skipping ${requestContext}: Evaluation status is '${evaluationData.status}'.`);
+            }
+
+        } // End for loop over evaluation keys
+
     } catch (error: any) {
-        console.error(`[EvalPay DEBUG - ${pollId}] Error during payout poll:`, error.message);
+        // Catch errors related to Recall client setup or the main query
+        console.error(`[PayoutPoll] Error during polling loop: ${error.message}`);
+        // Consider if specific errors should halt the service
     } finally {
+        // Schedule the next poll regardless of errors in the current cycle, unless shutting down
         if (!isShuttingDown) {
+            // console.log(`[PayoutPoll] Scheduling next poll in ${PAYOUT_POLLING_INTERVAL_MS / 1000} seconds.`);
             payoutPollTimer = setTimeout(pollForPendingPayouts, PAYOUT_POLLING_INTERVAL_MS);
         }
     }
 }
 
-// --- Service Start/Stop ---
+// --- Service Start/Stop (Unchanged) ---
 export function startEvaluationPayoutService(): void {
     if (evaluationPollTimer || payoutPollTimer) {
         console.warn("[EvaluationPayoutService] Polling loops already started.");
@@ -590,28 +621,21 @@ export function startEvaluationPayoutService(): void {
     }
     isShuttingDown = false;
     console.log("[EvaluationPayoutService] Starting polling loops...");
+    // Start polling after a short random delay
     evaluationPollTimer = setTimeout(() => {
         if (!isShuttingDown) pollForPendingEvaluations();
-    }, Math.random() * 1000);
+    }, 1000 + Math.random() * 2000);
     payoutPollTimer = setTimeout(() => {
         if (!isShuttingDown) pollForPendingPayouts();
-    }, 5000 + Math.random() * 1000);
+    }, 5000 + Math.random() * 2000); // Stagger payout polling slightly
 }
 
 export function stopEvaluationPayoutService(): void {
     console.log("[EvaluationPayoutService] Stopping polling loops...");
     isShuttingDown = true;
-    if (evaluationPollTimer) {
-        clearTimeout(evaluationPollTimer);
-        evaluationPollTimer = null;
-    }
-    if (payoutPollTimer) {
-        clearTimeout(payoutPollTimer);
-        payoutPollTimer = null;
-    }
+    if (evaluationPollTimer) { clearTimeout(evaluationPollTimer); evaluationPollTimer = null; }
+    if (payoutPollTimer) { clearTimeout(payoutPollTimer); payoutPollTimer = null; }
     isEvaluatingMap.clear();
     isProcessingPayoutMap.clear();
     console.log("[EvaluationPayoutService] Polling stopped.");
 }
-
-// ==== ./src/services/evaluationPayoutService.ts ====

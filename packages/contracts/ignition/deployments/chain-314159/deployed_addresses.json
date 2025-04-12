@@ -1,4 +1,4 @@
 {
-  "ZKPEvaluatorModule#Groth16Verifier": "0x6abc04a3768BA2f50AEE7b58F4456f2287f2C118",
-  "ZKPEvaluatorModule#ZKPEvaluatorAggregator": "0x7c8E9df2CC0BB852432170f5bAFa77Ff6B839Da5"
+  "SimpleZKPTestModule#Groth16Verifier": "0x498789B18C7e1e96eaD912c315087660088Da8ed",
+  "SimpleZKPTestModule#ZKPEvaluatorAggregator": "0xC3b253C447773F38af15F3e8629A370FadCd945a"
 }
