@@ -409,6 +409,32 @@ export async function logAnswerEvidence(metadata: AnswerEvidenceMetadata): Promi
     return handleLogResult('AnswerEvidence', requestContext, agentAddr, result);
 }
 
+export async function getAllQuestionsForUser(theUser: string): Promise<QuestionData[]> {
+    try {
+      // 1) Find question keys
+      //    getPendingJobs expects a "prefix" param but your code is flexible with prefix usage;
+      //    If you store *all* questions under the same folder, you can pass something like `reqs/`.
+      const allQuestionKeys = await getPendingJobs('reqs/');  // or simply `getPendingJobs('')`
+  
+      const results: QuestionData[] = [];
+  
+      for (const { key } of allQuestionKeys) {
+        const qData = await getObjectData<QuestionData>(key);
+        if (!qData) continue; // skip if not found or invalid
+  
+        // 2) Filter by matching user
+        if (qData.user === theUser) {
+          results.push(qData);
+        }
+      }
+  
+      return results;
+    } catch (error: any) {
+      console.error(`[Recall Service] Error fetching user questions for "${theUser}":`, error.message);
+      // On error, return an empty array or rethrow as needed
+      return [];
+    }
+  }
 
 // --- Function for Fetching Status (Adapted for New Structure but using original payoutStatus logic) ---
 
@@ -629,5 +655,17 @@ export async function deleteObject(key: string): Promise<boolean> {
     try { recall = await getRecallClient(); bucketAddr = await findLogBucketAddressOrFail(recall); await recall.bucketManager().delete(bucketAddr, key); console.log(`[Recall Service] Deleted object: ${key}`); return true; }
     catch (error: any) { if (!error.message?.includes('Not Found')) { console.error(`[Recall Service] Error deleting object ${key}:`, error.message); } return false; }
 }
+
+/**
+ * Checks if there is an evaluation.json for the given request context.
+ * Returns true if found, false otherwise.
+ */
+export async function isQuestionEvaluated(requestContext: string): Promise<boolean> {
+    const evalKey = getEvaluationKey(requestContext); // e.g. 'reqs/<ctx>/evaluation.json'
+    
+    // Reuse your existing getObjectData<T>(key) to see if the evaluation object is there:
+    const evalData = await getObjectData<EvaluationResult>(evalKey);
+    return !!evalData; // if not null/undefined, means there's an evaluation
+  }
 
 // ==== ./services/recallService.ts ====

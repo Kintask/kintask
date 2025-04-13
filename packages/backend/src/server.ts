@@ -5,11 +5,13 @@ import config from './config'; // Assuming src/config.ts
 import verifyRoutes from './routes/verify'; // Assuming src/routes/verify.ts
 import askRoutes from './routes/ask';       // Assuming src/routes/ask.ts
 import statusRoutes from './routes/status'; // Assuming src/routes/status.ts
+import questionsRoutes from './routes/questions'; // Assuming src/routes/status.ts
 // Import the new service start/stop functions
 import { startEvaluationPayoutService, stopEvaluationPayoutService } from './services/evaluationPayoutService'; // Assuming src/services/evaluationPayoutService.ts
 // Keep timelock service imports if still used elsewhere
 import { startRevealListener, stopRevealListener } from './services/timelockService'; // Assuming src/services/timelockService.ts
 
+import evaluationRoutes from './routes/evaluation';
 
 const app: Express = express();
 const port = config.port;
@@ -34,6 +36,9 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 app.use('/api', verifyRoutes); // Mount verify routes under /api
 app.use('/api', askRoutes);    // Mount ask routes under /api
 app.use('/api', statusRoutes); // Mount status routes under /api
+app.use('/api', questionsRoutes); // Mount status routes under /api
+app.use('/api', evaluationRoutes);
+
 
 // Root Route / Health Check
 app.get('/', (req: Request, res: Response) => {

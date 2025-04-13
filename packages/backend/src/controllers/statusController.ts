@@ -65,5 +65,7 @@ export async function handleStatusRequest(req: Request, res: Response, next: Nex
             console.error(`[Status Controller Error] Headers already sent for context ${requestContext}, cannot send error response.`);
         }
     }
+
+    
 }
 // ==== ./src/controllers/statusController.ts ====
