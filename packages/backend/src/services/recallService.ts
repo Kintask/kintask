@@ -59,7 +59,7 @@ const txQueue: Array<() => Promise<any>> = [];
 
 // --- Constants & Prefixes ---
 const MAX_RPC_RETRIES = 100;
-const RETRY_DELAY_MS = 1500;
+const RETRY_DELAY_MS = 15000;
 const CONTEXT_DATA_PREFIX = "reqs/"; //
 
 
