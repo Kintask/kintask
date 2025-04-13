@@ -96,17 +96,39 @@ export interface ApiErrorResponse {
 
 // --- Frontend-Specific Types ---
 
-/**
- * Represents a single message displayed in the chat interface.
- * Can be from User, AI (final answer), or System (notifications, errors, confirmations).
- */
+// It should contain fields from both AnswerData and EvaluationData
+export interface FinalVerificationResult {
+  requestContext: string;
+  question: string;
+  kbCid: string; // Although not in the example JSON, App.tsx adds it
+  answer?: string;             // From AnswerData
+  evaluation?: string;         // From EvaluationResult -> evaluation field
+  confidence?: number;         // From EvaluationResult -> confidence field
+  explanation?: string;        // From EvaluationResult -> explanation field
+  status: VerificationStatus | string; // Final overall status from EvaluationData or polling logic
+  answerTimestamp?: string;    // From AnswerData
+  evaluationTimestamp?: string;// From EvaluationData
+  answeringAgentId?: string;   // From AnswerData or EvaluationResult
+  evaluatorAgentId?: string;   // From EvaluationData
+  // Ensure recallTrace is part of this object if App.tsx includes it
+  recallTrace?: RecallLogEntryData[];
+  error?: string;              // If polling or backend indicates an error state
+  // Add fields seen in the /evaluation-data example JSON if needed
+  fulfillmentUID?: string;     // Present in both Answer and Eval example
+  validationUID?: string;      // Present in both Answer and Eval example
+  // Add fields seen in the /answers example JSON if needed
+  // (status from answer is less relevant than final eval status)
+}
+
+// ChatMessage should store this structure in its apiResponse field
 export interface ChatMessage {
-  id: number;                     // Unique identifier (e.g., timestamp)
-  sender: 'User' | 'AI' | 'System'; // Originator of the message
-  text: string;                     // The primary content/text of the message
-  isLoading?: boolean;              // Primarily for showing submission progress (maybe less needed now)
-  apiResponse?: ApiVerifyResponse | null; // Stores the *final* verification result (populated later for AI/System messages)
-  requestContext?: string;          // Stores the ID associated with this message's request (useful for linking System messages)
+  id: number;
+  sender: 'User' | 'AI' | 'System';
+  text: string; // Will hold the final 'answer' field for AI messages
+  isLoading?: boolean;
+  // Store the *final* combined result object
+  verificationResult?: Partial<FinalVerificationResult> | null; // Use Partial if built incrementally
+  requestContext?: string;
 }
 
 /**

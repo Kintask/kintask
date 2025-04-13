@@ -1,276 +1,283 @@
-// /src/services/apiService.ts (Modified getVerificationResult to always return null)
+// kintask/packages/frontend/src/services/apiService.ts
 
 import axios, { AxiosError } from 'axios';
 import {
-    AskApiResponse,
+    AskQuestionResponse, // Use updated type name
     ApiErrorResponse,
-    ApiVerifyResponse, // Main structure for final results
-    VerificationStatus,
-    RecallLogEntryData // Structure for trace logs
-} from '@/types'; // Adjust path as needed
-import { QuestionData } from '../types'; // or wherever your QuestionData interface is
-import { EvaluationResult } from '@/types';
-import { AnswerData} from '@/types'; 
+    // ApiVerifyResponse, // Replaced by FinalVerificationResult potentially
+    FinalVerificationResult, // Use this for final combined structure
+    QuestionData,
+    EvaluationData, // Import this type
+    EvaluationResult,
+    AnswerData
+} from '@/types'; // Adjust path as needed if using aliases, otherwise use relative path './types'
 
 
+const API_BASE_URL = '/api'; // For real API calls (uses Vite proxy)
+const DEFAULT_TIMEOUT = 600000; // Default timeout for requests
 
-// --- Configuration ---
-const USE_MOCK_API = false; // Set true for mock data (but getVerificationResult will ignore this now)
-const MOCK_API_DELAY = 750; // Delay for /ask submission
-const MOCK_STATUS_DELAY = 1500; // Delay for /status check (Not used by modified getVerificationResult)
-// --- End Configuration ---
-
-const API_BASE_URL = '/api'; // For real API calls
-
-
-
-// --- Mock Data Generation Helpers (Keep for askQuestion if needed) ---
-
-function createMockAskSuccessResponse(question: string, kbCid: string): AskApiResponse {
-    const timestamp = Date.now();
-    const contextId = `mock_ctx_${timestamp}_${Math.random().toString(36).substring(2, 8)}`;
-    const recallKey = `mock_recall_${timestamp}`;
-    console.log(`[Mock API - askQuestion] Generating SUCCESS response for context: ${contextId}`);
-    return {
-        message: `Mock request for "${question.substring(0, 20)}..." received successfully.`,
-        requestContext: contextId,
-        recallKey: recallKey,
-    };
-}
-
-
-
-function createMockAskErrorResponse(reason: string = "Mock processing error"): ApiErrorResponse {
-    console.log(`[Mock API - askQuestion] Generating ERROR response: ${reason}`);
-    return { isError: true, error: `Mock Submission Failed: ${reason}`, details: `Simulated error from mock askQuestion.` };
+// --- Helper for Error Handling ---
+function formatError(error: any, context?: string): ApiErrorResponse {
+    const axiosError = error as AxiosError<any>;
+    console.error(`[API Service${context ? ` ${context}`: ''}] Error:`, axiosError.message);
+    let errorMessage = 'An unknown API error occurred.';
+    let errorDetails: any = axiosError.stack;
+    let status = axiosError.response?.status;
+    if (axiosError.response?.data) {
+        if (typeof axiosError.response.data === 'string') { errorMessage = axiosError.response.data; }
+        else if (typeof axiosError.response.data.error === 'string') { errorMessage = axiosError.response.data.error; if (axiosError.response.data.message) errorMessage += `: ${axiosError.response.data.message}`; else if (axiosError.response.data.details) errorDetails = axiosError.response.data.details; }
+        else if (typeof axiosError.response.data.message === 'string') { errorMessage = axiosError.response.data.message; }
+    } else if (axiosError.message) { errorMessage = axiosError.message; }
+    console.error(`[API Service] Formatted Error: ${errorMessage}`, errorDetails);
+    return { isError: true, error: errorMessage, details: errorDetails, status };
 }
 
 // --- API Service Functions ---
 
 /**
- * Submits a question and knowledge base CID. (Mockable)
+ * Submits a question, knowledge base CID, and user address.
+ * POST /api/ask (or /api/verify - ensure backend route matches)
  */
-export async function askQuestion(question: string, knowledgeBaseCid: string, user: string): Promise<AskApiResponse | ApiErrorResponse> {
+export async function askQuestion(question: string, knowledgeBaseCid: string, user: string): Promise<AskQuestionResponse | ApiErrorResponse> {
     const trimmedQuestion = question.trim();
     const trimmedKnowledgeBaseCid = knowledgeBaseCid.trim();
-
-    // --- MOCK API LOGIC ---
-    if (USE_MOCK_API) {
-        console.log(`[Mock API - askQuestion] Received: Question="${trimmedQuestion.substring(0, 50)}...", KB CID="${trimmedKnowledgeBaseCid}"`);
-        if (!trimmedQuestion) { return createMockAskErrorResponse("Question cannot be empty."); }
-        if (!trimmedKnowledgeBaseCid || !(trimmedKnowledgeBaseCid.startsWith('Qm') || trimmedKnowledgeBaseCid.startsWith('bafy') || trimmedKnowledgeBaseCid.startsWith('bafk'))) { return createMockAskErrorResponse("Invalid/missing KB CID format."); }
-        await new Promise(resolve => setTimeout(resolve, MOCK_API_DELAY));
-        return createMockAskSuccessResponse(trimmedQuestion, trimmedKnowledgeBaseCid);
-    }
-
+    console.log(trimmedKnowledgeBaseCid)
     // --- REAL API LOGIC ---
-    console.log(`[API Service - askQuestion] Submitting REAL request...`);
+    console.log(`[API Service - askQuestion] Submitting request for user ${user.substring(0,6)}...`);
     if (!trimmedQuestion) { return { isError: true, error: "Question cannot be empty." }; }
-    if (!trimmedKnowledgeBaseCid || !(trimmedKnowledgeBaseCid.startsWith('Qm') || trimmedKnowledgeBaseCid.startsWith('bafy') || trimmedKnowledgeBaseCid.startsWith('bafk'))) { return { isError: true, error: "Invalid/missing KB CID format." }; }
-    const requestBody = { question: trimmedQuestion, knowledgeBaseCid: trimmedKnowledgeBaseCid, user };
+    // Basic CID check
+    if (!trimmedKnowledgeBaseCid || !(trimmedKnowledgeBaseCid.startsWith('Qm') || trimmedKnowledgeBaseCid.startsWith('baf') )) {
+        return { isError: true, error: "Invalid or missing Knowledge Base CID format." };
+    }
+    const requestBody = { question: trimmedQuestion, knowledgeBaseCid: trimmedKnowledgeBaseCid, user }; // Match backend payload { question, cid, user }
     try {
-        const response = await axios.post<AskApiResponse>(`${API_BASE_URL}/ask`, requestBody, { timeout: 30000, headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' } });
-        if (!response.data || typeof response.data.message !== 'string' || typeof response.data.requestContext !== 'string' || typeof response.data.recallKey !== 'string') { return { isError: true, error: "Unexpected server response structure.", details: JSON.stringify(response.data) }; }
+        // IMPORTANT: Ensure this endpoint matches your backend route (e.g., /api/ask or /api/verify)
+        const response = await axios.post<AskQuestionResponse>(`${API_BASE_URL}/verify`, requestBody, {
+             timeout: DEFAULT_TIMEOUT,
+             headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' }
+        });
+        // Validate expected fields in success response
+        if (!response.data || typeof response.data !== 'object' || typeof response.data.requestContext !== 'string') {
+             console.error("[API Service - askQuestion] Unexpected success response structure:", response.data);
+             return { isError: true, error: "Unexpected server acknowledgement response structure. "+response.data.status, details: JSON.stringify(response.data) };
+        }
+        console.log("[API Service - askQuestion] Success:", response.data);
         return response.data;
     } catch (error: any) {
-        let errorMessage = 'Unknown submission error.'; let errorDetails: string | undefined;
-        if (axios.isAxiosError(error)) { const axiosError = error as AxiosError<any>; if (axiosError.code === 'ECONNABORTED' || axiosError.message.toLowerCase().includes('timeout')) { errorMessage = "Submission timed out."; errorDetails = `Timeout: ${axiosError.config?.timeout}ms.`; } else if (axiosError.response) { const statusCode = axiosError.response.status; const responseData = axiosError.response.data; console.error(`[API Service - askQuestion] Server error: ${statusCode}`, responseData); errorMessage = `Server error during submission (${statusCode}).`; const backendErrorMsg = (typeof responseData === 'object' && responseData !== null) ? responseData.error || responseData.message || responseData.detail : (typeof responseData === 'string' ? responseData : null); if (typeof backendErrorMsg === 'string' && backendErrorMsg.trim() !== '') { errorMessage = backendErrorMsg; } errorDetails = `Status: ${statusCode}. Response: ${typeof responseData === 'object' ? JSON.stringify(responseData) : String(responseData).substring(0, 200)}`; } else if (axiosError.request) { errorMessage = "Network Error: No response."; errorDetails = `Is backend running?`; } else { errorMessage = `Request setup error: ${axiosError.message}`; } } else { errorMessage = `Unexpected error: ${error.message || String(error)}`; }
-        return { isError: true, error: errorMessage, details: errorDetails };
+        return formatError(error, `askQuestion`);
     }
 }
-
-
 
 /**
  * Fetches the status/result for a given request context ID.
  * **MODIFIED: This function now always returns null immediately without calling the backend.**
- *
- * @param requestContext The unique ID of the request to check.
- * @param originalQueryInfo Optional info about the original query (ignored now).
  */
 export async function getVerificationResult(
     requestContext: string,
-    originalQueryInfo?: { question: string; kbCid?: string }
-): Promise<ApiVerifyResponse | ApiErrorResponse | null> { // Added null to return type
-    console.log(`[API Service - getStatus] Request for context ${requestContext} received, returning null as requested.`);
-    // --- MODIFIED: Always return null ---
-    return null;
-    // --- End Modification ---
-
-
-    // --- Original MOCK API LOGIC (Now commented out) ---
-    /*
-    if (USE_MOCK_API) {
-      console.log(`[Mock API - getStatus] Requesting status for: ${requestContext}`);
-      await new Promise(resolve => setTimeout(resolve, MOCK_STATUS_DELAY));
-      if (requestContext.includes("fail_status")) { return createMockStatusErrorResponse(requestContext, "Simulated network error during status check"); }
-      const processingChance = Math.random();
-      if (processingChance < 0.33) { console.log(`[Mock API - getStatus] Simulating 'Processing' for ${requestContext}`); return { answer: "", status: 'Processing', } as ApiVerifyResponse; }
-      if (processingChance < 0.43) { return createMockFinalErrorResult(requestContext); }
-      return createMockFinalResult(requestContext, originalQueryInfo?.question);
-    }
-    */
-
-    // --- Original REAL API LOGIC (Now commented out) ---
-    /*
-    console.warn(`[API Service - getStatus] Real status check for ${requestContext} not fully implemented.`);
-     try {
-         const response = await axios.get<ApiVerifyResponse>(`${API_BASE_URL}/status/${requestContext}`, { timeout: 10000, headers: { 'Accept': 'application/json' } });
-          if (response.data && typeof response.data.answer === 'string' && typeof response.data.status === 'string') { return response.data; }
-          else { return { isError: true, error: "Invalid status response structure", details: JSON.stringify(response.data)}; }
-     } catch (error: any) {
-          let errorMessage = 'Unknown error fetching status.'; let errorDetails: string | undefined;
-           if (axios.isAxiosError(error)) { // ... (error handling) ... }
-           else { // ... (error handling) ... }
-           return { isError: true, error: errorMessage, details: errorDetails };
-     }
-     */
+    originalQueryInfo?: { question: string; kbCid?: string } // Parameter is ignored now
+): Promise<any | ApiErrorResponse | null> { // Use 'any' or a specific final result type if needed
+    console.warn(`[API Service - getVerificationResult] FUNCTION DEPRECATED/MODIFIED: Request for context ${requestContext} received, returning null immediately.`);
+    return null; // Always return null
 }
 
+/**
+ * Fetches all past questions submitted by a user.
+ * GET /api/questions/user/:userAddress
+ */
 export async function getUserQuestions(user: string): Promise<QuestionData[] | ApiErrorResponse> {
+     if (!user || typeof user !== 'string') return { isError: true, error: "Valid user address is required." };
     try {
-        // Adjust this path to match your Express route:
+        console.log(`[API Service] GET /api/questions/user/${user.substring(0,10)}...`);
         const response = await axios.get<QuestionData[]>(`${API_BASE_URL}/questions/user/${encodeURIComponent(user)}`, {
-            timeout: 15000,
+            timeout: DEFAULT_TIMEOUT,
             headers: { 'Accept': 'application/json' }
         });
-
-        // If successful, just return the QuestionData[] array
+        console.log(response)
+        if (!Array.isArray(response.data)) {
+             throw new Error("Invalid history response format from backend: Expected an array.");
+        }
+        console.log(`[API Service] GET /api/questions/user - Success: Received ${response.data.length} entries.`);
         return response.data;
     } catch (error: any) {
-        let errorMessage = 'Error fetching user questions.';
-        let details: string | undefined = undefined;
-
-        if (axios.isAxiosError(error)) {
-            const axiosErr = error as AxiosError<any>;
-            if (axiosErr.code === 'ECONNABORTED' || axiosErr.message.toLowerCase().includes('timeout')) {
-                errorMessage = 'Request timed out when fetching user questions.';
-            } else if (axiosErr.response) {
-                const statusCode = axiosErr.response.status;
-                const responseData = axiosErr.response.data;
-                errorMessage = `Failed to fetch questions (${statusCode}).`;
-                details = typeof responseData === 'object'
-                    ? JSON.stringify(responseData)
-                    : String(responseData);
-            } else {
-                errorMessage = 'Network error: No response.';
-            }
-        } else {
-            errorMessage = `Unexpected error: ${String(error)}`;
-        }
-
-        return {
-            isError: true,
-            error: errorMessage,
-            details,
-        };
+        return formatError(error, `getUserQuestions(${user.substring(0,6)})`);
     }
-    
 }
-export async function fetchEvaluationData(contextId: string): Promise<EvaluationResult | ApiErrorResponse> {
+
+/**
+ * Fetches the answer(s) submitted for a specific request context.
+ * GET /api/answers/:contextId
+ */
+export async function fetchAnswersForQuestion(contextId: string): Promise<AnswerData[] | ApiErrorResponse> {
+     if (!contextId) return { isError: true, error: "Request context ID is required." };
     try {
-      const response = await axios.get<EvaluationResult>(`/api/evaluation-data/${encodeURIComponent(contextId)}`, {
-        timeout: 15000,
-        headers: { Accept: 'application/json' },
-      });
-      return response.data; // the entire object
+        console.log(`[API Service] GET /api/answers/${contextId}`);
+        const response = await axios.get<AnswerData[]>(`${API_BASE_URL}/answers/${encodeURIComponent(contextId)}`, {
+            timeout: DEFAULT_TIMEOUT,
+            headers: { Accept: 'application/json' }
+        });
+         if (!Array.isArray(response.data)) {
+             throw new Error("Invalid answers response format from backend: Expected an array.");
+         }
+         console.log(`[API Service] GET /api/answers - Success: Received ${response.data.length} answer(s) for ${contextId}.`);
+        return response.data;
     } catch (error: any) {
-      // handle errors similar to your other methods
-      return {
-        isError: true,
-        error: 'Failed to fetch evaluation data.',
-        details: error?.message,
-      };
+        const axiosError = error as AxiosError;
+        if (axiosError.response?.status === 404) {
+             console.log(`[API Service] GET /api/answers - No answers found yet (404) for ${contextId}.`);
+             return []; // Return empty array if 404 (means processing, not error)
+        }
+        return formatError(error, `fetchAnswersForQuestion(${contextId})`);
     }
-  }
+}
+
+
+/**
+ * Fetches the evaluation data (results, status) for a specific request context.
+ * GET /api/evaluation-data/:contextId
+ */
+export async function fetchEvaluationData(contextId: string): Promise<EvaluationData | ApiErrorResponse> {
+     if (!contextId) return { isError: true, error: "Request context ID is required." };
+    try {
+        console.log(`[API Service] GET /api/evaluation-data/${contextId}`);
+        const response = await axios.get<EvaluationData>(`${API_BASE_URL}/evaluation-data/${encodeURIComponent(contextId)}`, {
+            timeout: DEFAULT_TIMEOUT,
+            headers: { Accept: 'application/json' }
+        });
+         // Basic validation
+         if (!response.data || typeof response.data !== 'object' || !response.data.requestContext) {
+              throw new Error("Invalid evaluation data response format from backend.");
+         }
+          console.log(`[API Service] GET /api/evaluation-data - Success for ${contextId}. Status: ${response.data.status}`);
+        return response.data;
+    } catch (error: any) {
+         const axiosError = error as AxiosError;
+         if (axiosError.response?.status === 404) {
+              console.log(`[API Service] GET /api/evaluation-data - Evaluation data not ready yet (404) for ${contextId}.`);
+              // Return specific error for 404 to indicate "still processing"
+              return { isError: true, error: `Evaluation data not ready for ${contextId}`, status: 404 };
+         }
+        return formatError(error, `fetchEvaluationData(${contextId})`);
+    }
+}
 
 
 /**
  * Checks if a question has been evaluated by calling GET /api/check-evaluation/:context
- * Returns an object { evaluated: boolean, message: string } or an ApiErrorResponse.
+ * Returns an object { evaluated: boolean, message: string, status?: string } or an ApiErrorResponse.
+ * We add status to the success response for more polling info.
  */
-export async function checkEvaluationStatus(contextId: string): Promise<{ evaluated: boolean; message: string } | ApiErrorResponse> {
+export async function checkEvaluationStatus(contextId: string): Promise<{ evaluated: boolean; message: string; status?: string } | ApiErrorResponse> {
+    if (!contextId) return { isError: true, error: "Request context ID is required." };
     try {
-      const response = await axios.get<{ evaluated: boolean; message: string }>(
+      console.log(`[API Service] GET /api/check-evaluation/${contextId}`);
+      // Assume backend returns { evaluated: boolean, message: string, status?: string }
+      const response = await axios.get<{ evaluated: boolean; message: string, status?: string }>(
         `${API_BASE_URL}/check-evaluation/${encodeURIComponent(contextId)}`,
         {
-          timeout: 15000,
+          timeout: DEFAULT_TIMEOUT,
           headers: { Accept: 'application/json' },
         }
       );
-  
-      // On success, return { evaluated: boolean, message: string }
-      return response.data;
+       if (typeof response.data?.evaluated !== 'boolean') {
+            throw new Error("Invalid check-evaluation response structure from backend.");
+       }
+       console.log(`[API Service] GET /api/check-evaluation - Success for ${contextId}. Evaluated: ${response.data.evaluated}, Status: ${response.data.status}`);
+      return response.data; // Contains { evaluated, message, status? }
     } catch (error: any) {
-      let errorMessage = 'Failed to check evaluation status.';
-      let errorDetails: string | undefined;
-  
-      if (axios.isAxiosError(error)) {
-        const axiosError = error as AxiosError<any>;
-        if (axiosError.code === 'ECONNABORTED' || axiosError.message.toLowerCase().includes('timeout')) {
-          errorMessage = 'Request timed out while checking evaluation status.';
-        } else if (axiosError.response) {
-          const statusCode = axiosError.response.status;
-          const responseData = axiosError.response.data;
-          errorMessage = `Server error checking evaluation (${statusCode}).`;
-          // Optionally parse backend error message
-          const backendMsg =
-            typeof responseData === 'object'
-              ? responseData.error || responseData.message || responseData.detail
-              : (typeof responseData === 'string' ? responseData : null);
-          if (typeof backendMsg === 'string' && backendMsg.trim() !== '') {
-            errorMessage = backendMsg;
-          }
-          errorDetails = `Status: ${statusCode}. Response: ${
-            typeof responseData === 'object'
-              ? JSON.stringify(responseData)
-              : String(responseData).substring(0, 200)
-          }`;
-        } else {
-          errorMessage = 'Network error: No response.';
-        }
-      } else {
-        errorMessage = `Unexpected error checking evaluation: ${String(error)}`;
-      }
-  
-      return { 
-        isError: true, 
-        error: errorMessage, 
-        details: errorDetails 
-      };
+         const axiosError = error as AxiosError;
+         if (axiosError.response?.status === 404) {
+              console.log(`[API Service] GET /api/check-evaluation - Evaluation status not found yet (404) for ${contextId}. Assuming not evaluated.`);
+              // Return specific structure for "not ready"
+              return { evaluated: false, message: "Evaluation pending or context not found.", status: "Pending Evaluation"};
+         }
+        return formatError(error, `checkEvaluationStatus(${contextId})`);
     }
-  }
+}
 
 
-  export async function fetchAnswersForQuestion(contextId: string): Promise<AnswerData[] | ApiErrorResponse> {
+// --- Combined Polling Function ---
+
+/**
+ * Polls evaluation status and fetches final results when ready.
+ */
+export async function pollForResult(
+    contextId: string,
+    originalQuestion: string, // Needed to construct FinalVerificationResult
+    kbCid: string // Needed to construct FinalVerificationResult
+): Promise<Partial<FinalVerificationResult> | ApiErrorResponse> { // Return Partial as it might be intermediate
+    if (!contextId) return { isError: true, error: "Context ID needed for polling." };
+
     try {
-      const response = await axios.get<AnswerData[]>(`${API_BASE_URL}/answers/${encodeURIComponent(contextId)}`, {
-        timeout: 15000,
-        headers: { Accept: 'application/json' }
-      });
-      return response.data; // array of answers
-    } catch (error: any) {
-      let errorMessage = 'Failed to fetch answers.';
-      let errorDetails: string | undefined;
-  
-      if (axios.isAxiosError(error)) {
-        // handle the error as you do in your other calls
-        const axiosErr = error as AxiosError<any>;
-        if (axiosErr.code === 'ECONNABORTED' || axiosErr.message.toLowerCase().includes('timeout')) {
-          errorMessage = 'Timeout fetching answers.';
-        } else if (axiosErr.response) {
-          const status = axiosErr.response.status;
-          const data = axiosErr.response.data;
-          errorMessage = `Server error fetching answers (${status}).`;
-          errorDetails = JSON.stringify(data);
-        } else {
-          errorMessage = 'Network error: No response.';
+        // 1. Check Evaluation Status first (primary check)
+        const statusCheckResponse = await checkEvaluationStatus(contextId);
+
+        if ('isError' in statusCheckResponse) {
+             // Error checking status - return polling error
+             return { ...statusCheckResponse, requestContext: contextId, question: originalQuestion, kbCid: kbCid, status: 'Error: Polling Failed' };
         }
-      } else {
-        errorMessage = `Unexpected error: ${String(error)}`;
-      }
-  
-      return { isError: true, error: errorMessage, details: errorDetails };
+
+        const currentStatus = statusCheckResponse.status || (statusCheckResponse.evaluated ? 'Unknown Completed' : 'Processing');
+        console.log(`[Polling ${contextId}] Status Check: Evaluated=${statusCheckResponse.evaluated}, Message=${statusCheckResponse.message}, CurrentStatus=${currentStatus}`);
+
+
+        if (!statusCheckResponse.evaluated) {
+            // Still processing, return intermediate status
+            return { requestContext: contextId, status: currentStatus, question: originalQuestion, kbCid: kbCid };
+        }
+
+        // --- Evaluation is marked as complete, fetch details ---
+        console.log(`[Polling ${contextId}] Evaluation complete. Fetching Answer and Evaluation details...`);
+
+        // 2. Fetch Evaluation Data (now that we know it should exist)
+        const evalResponse = await fetchEvaluationData(contextId);
+        if ('isError' in evalResponse) {
+            console.error(`[Polling ${contextId}] Error fetching evaluation data even after status check passed:`, evalResponse.error);
+            return { ...evalResponse, requestContext: contextId, question: originalQuestion, kbCid: kbCid, status: 'Error: Evaluation Failed' };
+        }
+        const finalEvalStatus = evalResponse.status; // Get final status from eval data
+
+        // 3. Fetch Answers
+        const answerResponse = await fetchAnswersForQuestion(contextId);
+        let finalAnswerText: string | undefined = "[Answer Unavailable]";
+        let answeringAgentId: string | undefined = undefined;
+        let answerTimestamp: string | undefined = undefined;
+
+        if ('isError' in answerResponse) {
+            console.warn(`[Polling ${contextId}] Failed to fetch final answers: ${answerResponse.error}`);
+        } else if (answerResponse.length > 0) {
+            finalAnswerText = answerResponse[0].answer; // Assume first answer
+            answeringAgentId = answerResponse[0].answeringAgentId;
+            answerTimestamp = answerResponse[0].timestamp;
+        } else {
+             console.log(`[Polling ${contextId}] No answers found for completed request ${contextId}.`);
+             finalAnswerText = "[No answer submitted]";
+        }
+
+        // 4. Construct Final Result Object
+        let primaryEvaluation: EvaluationResult | undefined = evalResponse.results?.[0];
+
+        const finalResult: FinalVerificationResult = {
+            requestContext: contextId,
+            question: originalQuestion,
+            kbCid: kbCid,
+            answer: finalAnswerText,
+            evaluation: primaryEvaluation?.evaluation || 'N/A',
+            confidence: primaryEvaluation?.confidence,
+            explanation: primaryEvaluation?.explanation,
+            status: finalEvalStatus, // Use status from evaluation data
+            answerTimestamp: answerTimestamp,
+            evaluationTimestamp: evalResponse.timestamp,
+            answeringAgentId: answeringAgentId || primaryEvaluation?.answeringAgentId,
+            evaluatorAgentId: evalResponse.evaluatorAgentId,
+            // recallTrace: // TODO: Fetch trace data separately if needed
+            error: finalEvalStatus.includes('Failed') || finalEvalStatus.includes('Error') ? `Processing ended with status: ${finalEvalStatus}` : undefined,
+        };
+
+        console.log(`[Polling ${contextId}] Constructed final result:`, finalResult);
+        return finalResult; // Return the full final result
+
+    } catch (error) {
+        console.error(`[Polling ${contextId}] Critical error during polling process:`, error);
+        return formatError(error, `pollForResult(${contextId})`);
     }
-  }
-// /src/services/apiService.ts
+}

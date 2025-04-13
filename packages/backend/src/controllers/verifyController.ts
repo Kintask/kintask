@@ -32,7 +32,7 @@ export async function handleVerifyRequest(req: Request, res: Response, next: Nex
      console.warn(`[Verify Controller][${uniqueRequestContext}] Invalid question received.`);
      // --- FIX: Add return ---
      return res.status(400).json({ error: 'Invalid request body: Missing or invalid "question".', requestContext: uniqueRequestContext });
-  }
+  } 
   if (!knowledgeBaseCid || typeof knowledgeBaseCid !== 'string' || !isValidCid(knowledgeBaseCid)) {
      console.warn(`[Verify Controller][${uniqueRequestContext}] Invalid knowledgeBaseCid received.`);
      // --- FIX: Add return ---

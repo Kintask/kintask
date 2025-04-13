@@ -6,10 +6,10 @@ settings:
 
 patchedDependencies:
   blocklock-js@0.0.8-rc1:
-    hash: 38f2ad9398103d4e61eeb67f653c0e1489cc687bd153c607539359218d54ed27
+    hash: 4zcxgngcf33t46thtjdysrcxiy
     path: patches/blocklock-js@0.0.8-rc1.patch
   cborg@4.2.9:
-    hash: 78e2336d81e482786a05c4d75e2bf0877e323f4aa62c73fc5fa554ac6c3040df
+    hash: 33jw2nq3s6plcto7rhzybitewe
     path: patches/cborg@4.2.9.patch
 
 importers:
@@ -42,7 +42,7 @@ importers:
         version: 1.8.4
       blocklock-js:
         specifier: latest
-        version: 0.0.8-rc1(patch_hash=38f2ad9398103d4e61eeb67f653c0e1489cc687bd153c607539359218d54ed27)(bufferutil@4.0.9)(utf-8-validate@5.0.10)
+        version: 0.0.8-rc1(patch_hash=4zcxgngcf33t46thtjdysrcxiy)(bufferutil@4.0.9)(utf-8-validate@5.0.10)
       cors:
         specifier: ^2.8.5
         version: 2.8.5
@@ -83,6 +83,9 @@ importers:
       '@typescript-eslint/parser':
         specifier: ^7.3.1
         version: 7.18.0(eslint@8.57.1)(typescript@5.8.2)
+      crypto:
+        specifier: ^1.0.1
+        version: 1.0.1
       eslint:
         specifier: ^8.57.0
         version: 8.57.1
@@ -128,7 +131,7 @@ importers:
         version: 1.0.12(hardhat@2.22.19(bufferutil@4.0.9)(ts-node@10.9.2(@types/node@20.17.30)(typescript@5.8.2))(typescript@5.8.2)(utf-8-validate@5.0.10))
       '@nomicfoundation/hardhat-toolbox':
         specifier: ^5.0.0
-        version: 5.0.0(bba1517894b90d0c15d932765710d515)
+        version: 5.0.0(skzzdcszxfmamlxbya2imwfkhi)
       '@nomicfoundation/hardhat-verify':
         specifier: ^2.0.6
         version: 2.0.13(hardhat@2.22.19(bufferutil@4.0.9)(ts-node@10.9.2(@types/node@20.17.30)(typescript@5.8.2))(typescript@5.8.2)(utf-8-validate@5.0.10))
@@ -2266,6 +2269,10 @@ packages:
 
   crypto-addr-codec@0.1.8:
     resolution: {integrity: sha512-GqAK90iLLgP3FvhNmHbpT3wR6dEdaM8hZyZtLX29SPardh3OA13RFLHDR6sntGCgRWOfiHqW6sIyohpNqOtV/g==}
+
+  crypto@1.0.1:
+    resolution: {integrity: sha512-VxBKmeNcqQdiUQUW2Tzq0t377b54N2bMtXO/qiLa+6eRRmmC4qT3D4OnTGoT/U6O9aklQ/jTwbOtRMTTY8G0Ig==}
+    deprecated: This package is no longer supported. It's now a built-in Node module. If you've depended on crypto, you should switch to the one that's built-in.
 
   css-select@5.1.0:
     resolution: {integrity: sha512-nwoRF1rvRRnnCqqY7updORDsuqKzqYJ28+oSMaJMMgOauh3fvwHqMS7EZpIPqK8GL+g9mKxF1vP/ZjSeNjEVHg==}
@@ -6220,18 +6227,18 @@ snapshots:
   '@ipld/car@5.4.0':
     dependencies:
       '@ipld/dag-cbor': 9.2.2
-      cborg: 4.2.9(patch_hash=78e2336d81e482786a05c4d75e2bf0877e323f4aa62c73fc5fa554ac6c3040df)
+      cborg: 4.2.9(patch_hash=33jw2nq3s6plcto7rhzybitewe)
       multiformats: 13.3.2
       varint: 6.0.0
 
   '@ipld/dag-cbor@9.2.2':
     dependencies:
-      cborg: 4.2.9(patch_hash=78e2336d81e482786a05c4d75e2bf0877e323f4aa62c73fc5fa554ac6c3040df)
+      cborg: 4.2.9(patch_hash=33jw2nq3s6plcto7rhzybitewe)
       multiformats: 13.3.2
 
   '@ipld/dag-json@10.2.3':
     dependencies:
-      cborg: 4.2.9(patch_hash=78e2336d81e482786a05c4d75e2bf0877e323f4aa62c73fc5fa554ac6c3040df)
+      cborg: 4.2.9(patch_hash=33jw2nq3s6plcto7rhzybitewe)
       multiformats: 13.3.2
 
   '@ipld/dag-pb@4.1.3':
@@ -6465,7 +6472,7 @@ snapshots:
       ethereumjs-util: 7.1.5
       hardhat: 2.22.19(bufferutil@4.0.9)(ts-node@10.9.2(@types/node@20.17.30)(typescript@5.8.2))(typescript@5.8.2)(utf-8-validate@5.0.10)
 
-  '@nomicfoundation/hardhat-toolbox@5.0.0(bba1517894b90d0c15d932765710d515)':
+  '@nomicfoundation/hardhat-toolbox@5.0.0(skzzdcszxfmamlxbya2imwfkhi)':
     dependencies:
       '@nomicfoundation/hardhat-chai-matchers': 2.0.8(@nomicfoundation/hardhat-ethers@3.0.8(ethers@6.13.5(bufferutil@4.0.9)(utf-8-validate@5.0.10))(hardhat@2.22.19(bufferutil@4.0.9)(ts-node@10.9.2(@types/node@20.17.30)(typescript@5.8.2))(typescript@5.8.2)(utf-8-validate@5.0.10)))(chai@4.5.0)(ethers@6.13.5(bufferutil@4.0.9)(utf-8-validate@5.0.10))(hardhat@2.22.19(bufferutil@4.0.9)(ts-node@10.9.2(@types/node@20.17.30)(typescript@5.8.2))(typescript@5.8.2)(utf-8-validate@5.0.10))
       '@nomicfoundation/hardhat-ethers': 3.0.8(ethers@6.13.5(bufferutil@4.0.9)(utf-8-validate@5.0.10))(hardhat@2.22.19(bufferutil@4.0.9)(ts-node@10.9.2(@types/node@20.17.30)(typescript@5.8.2))(typescript@5.8.2)(utf-8-validate@5.0.10))
@@ -6653,7 +6660,7 @@ snapshots:
   '@recallnet/fvm@0.0.1':
     dependencies:
       blakejs: 1.2.1
-      cborg: 4.2.9(patch_hash=78e2336d81e482786a05c4d75e2bf0877e323f4aa62c73fc5fa554ac6c3040df)
+      cborg: 4.2.9(patch_hash=33jw2nq3s6plcto7rhzybitewe)
       uint8arrays: 5.1.0
 
   '@recallnet/network-constants@0.0.7': {}
@@ -7664,7 +7671,7 @@ snapshots:
 
   blakejs@1.2.1: {}
 
-  blocklock-js@0.0.8-rc1(patch_hash=38f2ad9398103d4e61eeb67f653c0e1489cc687bd153c607539359218d54ed27)(bufferutil@4.0.9)(utf-8-validate@5.0.10):
+  blocklock-js@0.0.8-rc1(patch_hash=4zcxgngcf33t46thtjdysrcxiy)(bufferutil@4.0.9)(utf-8-validate@5.0.10):
     dependencies:
       '@noble/curves': 1.8.1
       '@noble/hashes': 1.7.1
@@ -7886,7 +7893,7 @@ snapshots:
     dependencies:
       nofilter: 3.1.0
 
-  cborg@4.2.9(patch_hash=78e2336d81e482786a05c4d75e2bf0877e323f4aa62c73fc5fa554ac6c3040df): {}
+  cborg@4.2.9(patch_hash=33jw2nq3s6plcto7rhzybitewe): {}
 
   chai-as-promised@7.1.2(chai@4.5.0):
     dependencies:
@@ -8178,6 +8185,8 @@ snapshots:
       ripemd160-min: 0.0.6
       safe-buffer: 5.2.1
       sha3: 2.1.4
+
+  crypto@1.0.1: {}
 
   css-select@5.1.0:
     dependencies:

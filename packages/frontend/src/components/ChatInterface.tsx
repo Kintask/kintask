@@ -17,7 +17,6 @@ interface ChatInterfaceProps {
   messages: ChatMessage[];
   onSendMessage: (message: string, knowledgeBaseCid: string) => void;
   addSystemMessage: (text: string) => void;
-  addAiMessage: (message: ChatMessage) => void;
 }
 
 // --- Constants ---
@@ -33,7 +32,6 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     messages,
     onSendMessage,
     addSystemMessage,
-    addAiMessage,
  }) => {
   // --- State ---
   const [inputValue, setInputValue] = useState(''); // User question
@@ -97,7 +95,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
         return;
     }
     const hasFile = !!knowledgeBaseFile;
-    const hasValidPastedCid = !!trimmedPastedCid && /^(Qm|bafy|bafk)[a-zA-Z0-9]{40,}/.test(trimmedPastedCid);
+    const hasValidPastedCid = !!trimmedPastedCid && /^(Qm|baf)[a-zA-Z0-9]{40,}/.test(trimmedPastedCid);
 
     // Require either File+Email OR a valid CID
     if (hasFile && (!trimmedUserEmail || !/\S+@\S+\.\S+/.test(trimmedUserEmail))) {
@@ -115,7 +113,6 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
     let userMessageText = trimmedQuestion;
     if (hasFile && knowledgeBaseFile) userMessageText += `\n(Using file: ${knowledgeBaseFile.name})`;
     else if (hasValidPastedCid) userMessageText += `\n(Using KB CID: ${trimmedPastedCid.substring(0, 10)}...)`;
-    addAiMessage({ id: userTimestamp, sender: 'User', text: userMessageText, apiResponse: null });
 
     setIsProcessing(true);
     let finalCid: string | undefined = undefined;
@@ -187,7 +184,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
         inputValue.trim() &&
         !isProcessing &&
         ( (knowledgeBaseFile && userEmail.trim() && /\S+@\S+\.\S+/.test(userEmail.trim())) || // File needs valid email
-          (!knowledgeBaseFile && pastedCid.trim() && /^(Qm|bafy|bafk)[a-zA-Z0-9]{40,}/.test(pastedCid.trim())) // Or valid CID if no file
+          (!knowledgeBaseFile && pastedCid.trim() && /^(Qm|baf)[a-zA-Z0-9]{40,}/.test(pastedCid.trim())) // Or valid CID if no file
         )
     );
 
