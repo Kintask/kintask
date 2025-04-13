@@ -194,8 +194,8 @@ export async function addObjectToBucket(
         recall = await getRecallClient();
         bucketAddr = await findLogBucketAddressOrFail(recall);
         const balance = await publicClient.getBalance({ address: currentAccount.address });
-        console.log(`[Recall Service - addObj] Native Balance ${currentAccount.address}: ${formatEther(balance)}`);
-        await checkAndBuyRecallCreditsIfNeeded(recall);
+    console.log(`[Recall Service - addObj] Native Balance ${currentAccount.address}: ${formatEther(balance)}`);
+//    await checkAndBuyRecallCreditsIfNeeded(recall);
     } catch (setupError: any) { const errMsg = setupError?.message?.split('\n')[0] || String(setupError); console.error(`[Recall Setup Error - addObj] Key ${key}:`, errMsg); return { success: false, error: `Setup failed: ${errMsg}`, key }; }
 
     const contentStr = JSON.stringify(dataObject, null, 2);
@@ -204,7 +204,7 @@ export async function addObjectToBucket(
 
     // --- Key Existence Pre-Check ---
     try {
-        console.log(`[Recall Service - addObj] Checking existence for key: ${key}`);
+     //   console.log(`[Recall Service - addObj] Checking existence for key: ${key}`);
         const { result: existingObject } = await bucketManager.get(bucketAddr, key);
         if (existingObject) { console.warn(`[Recall Service - addObj] Key already exists: ${key}. Skipping add.`); return { success: false, keyExists: true, error: `Key already exists: ${key}`, key }; }
     } catch (getError: any) {

@@ -24,8 +24,8 @@ import { getAddress, Address, isAddress } from 'viem';
 import { truncateText } from '../utils'; // Adjust import path as needed
 
 // --- Configuration ---
-const EVALUATION_POLLING_INTERVAL_MS = 45000;
-const PAYOUT_POLLING_INTERVAL_MS = 120000;
+const EVALUATION_POLLING_INTERVAL_MS = 95000;
+const PAYOUT_POLLING_INTERVAL_MS = 140000;
 const EVALUATION_WAIT_TIME_MS = 60_000; // 1 minute wait after question
 
 let BACKEND_EVALUATOR_ID: Address = "0xBackendEvaluatorPlaceholder";
@@ -624,10 +624,10 @@ export function startEvaluationPayoutService(): void {
     // Start polling after a short random delay
     evaluationPollTimer = setTimeout(() => {
         if (!isShuttingDown) pollForPendingEvaluations();
-    }, 1000 + Math.random() * 2000);
+    }, 10000 + Math.random() * 2000);
     payoutPollTimer = setTimeout(() => {
         if (!isShuttingDown) pollForPendingPayouts();
-    }, 5000 + Math.random() * 2000); // Stagger payout polling slightly
+    }, 50000 + Math.random() * 2000); // Stagger payout polling slightly
 }
 
 export function stopEvaluationPayoutService(): void {

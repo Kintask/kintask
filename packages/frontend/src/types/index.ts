@@ -2,26 +2,26 @@
 
 // --- Verification Status (Matches Backend - For FINAL Result) ---
 export type VerificationStatus =
-    | 'Verified'
-    | 'Unverified' // Often an initial or intermediate state
-    | 'Flagged: Uncertain'
-    | 'Flagged: Contradictory'
-    | 'Error: Verification Failed'
-    | 'Error: Timelock Failed'
-    // Add states relevant during processing if needed by the /status endpoint
-    | 'Processing'
-    | 'Pending Verification'
-    | 'Completed' // Generic completion before specific status?
-    // Add frontend-specific error statuses if needed
-    | 'Error: Network/Server Issue'
-    | 'Error: Invalid Response Format'
-    | 'Error: Request Setup Failed'
-    | 'Error: Unknown Client Issue'
-    | 'Error: No Response'
-    | 'System Notification'; // For system messages in chat
+  | 'Verified'
+  | 'Unverified' // Often an initial or intermediate state
+  | 'Flagged: Uncertain'
+  | 'Flagged: Contradictory'
+  | 'Error: Verification Failed'
+  | 'Error: Timelock Failed'
+  // Add states relevant during processing if needed by the /status endpoint
+  | 'Processing'
+  | 'Pending Verification'
+  | 'Completed' // Generic completion before specific status?
+  // Add frontend-specific error statuses if needed
+  | 'Error: Network/Server Issue'
+  | 'Error: Invalid Response Format'
+  | 'Error: Request Setup Failed'
+  | 'Error: Unknown Client Issue'
+  | 'Error: No Response'
+  | 'System Notification'; // For system messages in chat
 
 // --- Recall Log Entry (Matches Backend - For FINAL Result) ---
- export interface RecallLogEntryData {
+export interface RecallLogEntryData {
   timestamp: string;
   type: string; // e.g., 'START', 'LLM_QUERY', 'RECALL_FETCH', 'VERDICT', 'ERROR'
   details: Record<string, any>; // Flexible details object
@@ -42,6 +42,20 @@ export interface ApiVerifyResponse {
   details?: string;                  // More detailed error/process info (optional)
 }
 
+// In packages/frontend/src/types/index.ts
+
+// --- Question Data Structure (for fetching user questions) ---
+export interface QuestionData {
+  question: string;
+  cid: string; // CID of the knowledge base fragment used
+  status: VerificationStatus; // Reusing the VerificationStatus type
+  timestamp: string; // ISO 8601 when the question was submitted
+  requestContext: string; // Unique ID for the entire request flow
+  paymentUID?: string; // UID of the ERC20PaymentStatement attestation
+  paymentRef?: string; // Optional reference string related to payment
+  callbackUrl?: string; // Optional URL to notify upon completion/error
+  user?: string // User's Ethereum address
+}
 // --- INITIAL API Response Structure (Expected from /api/ask) ---
 export interface AskApiResponse {
   message: string;        // Confirmation message (e.g., "Request received...")
@@ -54,9 +68,9 @@ export interface AskApiResponse {
  * Structure for handling errors returned specifically from frontend API service calls.
  */
 export interface ApiErrorResponse {
-    error: string;          // User-facing or internal error message
-    details?: string;       // Optional technical details (like status code, raw data snippet)
-    isError: true;          // Type guard flag
+  error: string;          // User-facing or internal error message
+  details?: string;       // Optional technical details (like status code, raw data snippet)
+  isError: true;          // Type guard flag
 }
 
 
