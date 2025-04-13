@@ -161,5 +161,59 @@ export async function getUserQuestions(user: string): Promise<QuestionData[] | A
             details,
         };
     }
-}
+
+    /**
+ * Checks if a question has been evaluated by calling GET /api/check-evaluation/:context
+ * Returns an object { evaluated: boolean, message: string } or an ApiErrorResponse.
+ */
+    export async function checkEvaluationStatus(contextId: string): Promise<{ evaluated: boolean; message: string } | ApiErrorResponse> {
+        try {
+            const response = await axios.get<{ evaluated: boolean; message: string }>(
+                `${API_BASE_URL}/check-evaluation/${encodeURIComponent(contextId)}`,
+                {
+                    timeout: 15000,
+                    headers: { Accept: 'application/json' },
+                }
+            );
+
+            // On success, return { evaluated: boolean, message: string }
+            return response.data;
+        } catch (error: any) {
+            let errorMessage = 'Failed to check evaluation status.';
+            let errorDetails: string | undefined;
+
+            if (axios.isAxiosError(error)) {
+                const axiosError = error as AxiosError<any>;
+                if (axiosError.code === 'ECONNABORTED' || axiosError.message.toLowerCase().includes('timeout')) {
+                    errorMessage = 'Request timed out while checking evaluation status.';
+                } else if (axiosError.response) {
+                    const statusCode = axiosError.response.status;
+                    const responseData = axiosError.response.data;
+                    errorMessage = `Server error checking evaluation (${statusCode}).`;
+                    // Optionally parse backend error message
+                    const backendMsg =
+                        typeof responseData === 'object'
+                            ? responseData.error || responseData.message || responseData.detail
+                            : (typeof responseData === 'string' ? responseData : null);
+                    if (typeof backendMsg === 'string' && backendMsg.trim() !== '') {
+                        errorMessage = backendMsg;
+                    }
+                    errorDetails = `Status: ${statusCode}. Response: ${typeof responseData === 'object'
+                            ? JSON.stringify(responseData)
+                            : String(responseData).substring(0, 200)
+                        }`;
+                } else {
+                    errorMessage = 'Network error: No response.';
+                }
+            } else {
+                errorMessage = `Unexpected error checking evaluation: ${String(error)}`;
+            }
+
+            return {
+                isError: true,
+                error: errorMessage,
+                details: errorDetails
+            };
+        }
+    }
 // /src/services/apiService.ts
