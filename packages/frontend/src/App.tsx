@@ -354,17 +354,47 @@ function App() {
                                     setIsLoadingModalVisible(false);
                                 }
                             } else { // Success path (intermediate or final)
-                                const currentStatus = result.status as VerificationStatus;
-                                const isTerminal = TERMINAL_STATUSES.includes(currentStatus);
-                                // Update Loading Modal if visible and matches context
+                                // Assuming 'result' contains the backend response including status and the new flag
+                                // Assuming 'VerificationStatus' is a type/enum for statuses
+                                // Assuming 'TERMINAL_STATUSES' is an array/set of statuses that should close the modal
+                                // Assuming 'isLoadingModalVisible', 'setIsLoadingModalVisible', 'loadingModalContextId',
+                                // 'setLoadingModalMessage', 'setLoadingModalSubMessage', and 'contextId' are part of your component's state/props
+
+                                const currentStatus = result.status as VerificationStatus; // Get the status from the result
+                                const isTerminal = TERMINAL_STATUSES.includes(currentStatus); // Check if it's a terminal status
+
+                                // --- MODIFICATION START ---
+
+                                // Priority Check: Close modal immediately if evaluation.json exists
+                                // This assumes 'result' object has a boolean property 'evaluationFileExists'
+                                if (result.evaluationFileExists === true) {
+                                    console.log("Evaluation file exists, closing loading modal."); // Optional logging
+                                    setIsLoadingModalVisible(false);
+                                }
+
+                                // Commented out: Condition to close modal on PendingPayout is removed as requested
+                                // if (currentStatus === "PendingPayout") {
+                                //     console.log("Status is PendingPayout, closing loading modal."); // Optional logging
+                                //     setIsLoadingModalVisible(false);
+                                // }
+
+                                // --- MODIFICATION END ---
+
+                                // Existing logic to update/close modal based on terminal status or ongoing processing
+                                // This block only runs if the modal hasn't already been closed by the evaluationFileExists check
                                 if (isLoadingModalVisible && loadingModalContextId === contextId) {
                                     if (isTerminal) {
+                                        // If the status is terminal (and the evaluation file didn't exist to close it sooner)
+                                        console.log(`Terminal status (${currentStatus}) reached, closing loading modal.`); // Optional logging
                                         setIsLoadingModalVisible(false); // Hide modal on terminal status
                                     } else {
-                                        setLoadingModalMessage("Processing Request..."); // Keep main message generic
-                                        setLoadingModalSubMessage(`Status: ${currentStatus}`); // Update sub-message with status
+                                        // If the status is not terminal and the modal should still be visible
+                                        setLoadingModalMessage("Processing Request..."); // Keep main message consistent
+                                        setLoadingModalSubMessage(`Status: ${currentStatus}`); // Update sub-message with the current status
                                     }
                                 }
+
+                                // Rest of your state update logic or component rendering follows...
 
                                 if (isTerminal) {
                                     console.log(`[Polling] Final result for ${contextId.substring(0, 10)}: Status ${currentStatus}`);
