@@ -17,6 +17,7 @@ import {
     VerificationStatus // Enum/Type for status strings
 } from '@/types'; // Adjust path if necessary
 
+const IPFS_GATEWAY_URL = "https://w3s.link/ipfs/"
 // Type for the acknowledgement response from backend POST /verify
 interface VerifySubmissionResponse { message: string; requestContext: string; }
 

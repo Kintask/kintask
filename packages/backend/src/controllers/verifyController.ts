@@ -1,118 +1,159 @@
-// src/controllers/verifyController.ts
+// kintask/packages/backend/src/controllers/verifyController.ts
+
 import { Request, Response, NextFunction } from 'express';
 // Ensure correct import paths relative to this file
-import { generateClaim } from '../services/generatorService'; // Assuming src/services/generatorService.ts
-import { performVerification } from '../services/verifierService'; // Assuming src/services/verifierService.ts
-// import { logErrorEvent } from '../services/recallService'; // Assuming src/services/recallService.ts
-import { VerificationResultInternal, ApiVerifyResponse, RecallLogEntryData } from '../types'; // Assuming src/types/index.ts
-import { getL2ExplorerUrl, isValidCid } from '../utils'; // Assuming src/utils/index.ts
+import { generateClaim } from '../services/generatorService'; // Assumes this specific function IS exported
+import { performVerification } from '../services/verifierService'; // Assumes this specific function IS exported
+// Removed unused logErrorEvent import for now
+// import { logErrorEvent } from '../services/recallService';
+import {
+    VerificationResultInternal,
+    ApiVerifyResponse, // Used for success/error response structure
+    RecallLogEntryData // Type for reasoningSteps in VerificationResultInternal
+    // Removed ApiErrorResponse import
+} from '../types';
+import { getL2ExplorerUrl, isValidCid } from '../utils'; // Assuming these utils exist and work
 
 /**
  * Handles the original synchronous /verify request.
  * Performs claim generation and verification within a single request.
- * Kept for reference or direct use cases but differs from the async flow.
+ * Returns the full result or an error immediately.
  */
-export async function handleVerifyRequest(req: Request, res: Response, next: NextFunction): Promise<void> {
+// --- FIX: Correct Return Type ---
+export async function handleVerifyRequest(req: Request, res: Response, next: NextFunction): Promise<Response | void> {
   const { question, knowledgeBaseCid } = req.body;
   const uniqueRequestContext = `verify_${Date.now()}_${Math.random().toString(16).substring(2, 8)}`; // Different prefix
 
-  console.warn(`[Verify Controller] WARN: Using synchronous /verify endpoint. Context: ${uniqueRequestContext.substring(0,15)}...`);
+  // Add logging for entry
+  console.log(`[Verify Controller][${uniqueRequestContext}] Handling SYNC request - Q: "${question?.substring(0,50)}...", CID: ${knowledgeBaseCid?.substring(0,10)}...`);
 
   // --- Validation ---
   if (!question || typeof question !== 'string' || question.trim() === '') {
-     res.status(400).json({ error: 'Invalid request body: Missing or invalid "question".' }); return;
+     console.warn(`[Verify Controller][${uniqueRequestContext}] Invalid question received.`);
+     // --- FIX: Add return ---
+     return res.status(400).json({ error: 'Invalid request body: Missing or invalid "question".', requestContext: uniqueRequestContext });
   }
   if (!knowledgeBaseCid || typeof knowledgeBaseCid !== 'string' || !isValidCid(knowledgeBaseCid)) {
-     res.status(400).json({ error: 'Invalid request body: Missing or invalid "knowledgeBaseCid".' }); return;
+     console.warn(`[Verify Controller][${uniqueRequestContext}] Invalid knowledgeBaseCid received.`);
+     // --- FIX: Add return ---
+     return res.status(400).json({ error: 'Invalid request body: Missing or invalid "knowledgeBaseCid".', requestContext: uniqueRequestContext });
   }
-  if (question.length > 1500) { // Example length limit
-     res.status(400).json({ error: 'Question exceeds maximum length (1500 characters).' }); return;
+  const trimmedQuestion = question.trim(); // Use trimmed versions
+  const trimmedKnowledgeBaseCid = knowledgeBaseCid.trim();
+  if (trimmedQuestion.length > 1500) {
+     console.warn(`[Verify Controller][${uniqueRequestContext}] Question too long.`);
+     // --- FIX: Add return ---
+     return res.status(400).json({ error: 'Question exceeds maximum length (1500 characters).', requestContext: uniqueRequestContext });
   }
   // --- End Validation ---
 
   let verificationResult: VerificationResultInternal | null = null;
-  let generatedClaim: string | undefined = "Processing...";
+  let generatedClaim: string | undefined = undefined; // Initialize as undefined
 
-  console.log(`[Verify Controller] Handling sync request ${uniqueRequestContext.substring(0, 15)}... | KB CID: ${knowledgeBaseCid.substring(0,10)}...`);
   try {
-    // Step 1: Generate Claim (ensure generateClaim is exported and handles CID)
-    // Note: This assumes generateClaim still exists and functions as originally intended
-    // If it was removed or fully replaced by generateAnswerFromContent, this will fail.
-    generatedClaim = await generateClaim(question, knowledgeBaseCid, uniqueRequestContext);
-    if (typeof generatedClaim !== 'string') { throw new Error('Generator returned invalid type'); }
-    if (generatedClaim.startsWith('Error:')) { throw new Error(`Claim Generation Failed: ${generatedClaim}`); }
-    console.log(`[Verify Controller] Generated Claim: ${generatedClaim.substring(0,100)}...`);
+    // Step 1: Generate Claim
+    console.log(`[Verify Controller][${uniqueRequestContext}] Generating claim...`);
+    generatedClaim = await generateClaim(trimmedQuestion, trimmedKnowledgeBaseCid, uniqueRequestContext); // Pass trimmed values
 
-    // Step 2: Perform Verification (ensure performVerification is exported and handles CID)
-    verificationResult = await performVerification(question, generatedClaim, knowledgeBaseCid, uniqueRequestContext);
-    if (!verificationResult) { throw new Error("Verification service returned null result"); }
-    console.log(`[Verify Controller] Verification Result Status: ${verificationResult.finalVerdict}`);
+    // Validate claim generation result
+    if (typeof generatedClaim !== 'string') {
+        throw new Error('Generator service returned invalid type for claim (expected string).');
+    }
+    if (generatedClaim.startsWith('Error:')) {
+        // Throw the specific error message from the generator
+        throw new Error(`Claim Generation Failed: ${generatedClaim}`);
+    }
+    console.log(`[Verify Controller][${uniqueRequestContext}] Generated Claim: "${generatedClaim.substring(0,100)}..."`);
+
+
+    // Step 2: Perform Verification
+    console.log(`[Verify Controller][${uniqueRequestContext}] Performing verification...`);
+    // Assuming performVerification expects 4 arguments for this synchronous flow
+    verificationResult = await performVerification(trimmedQuestion, generatedClaim, trimmedKnowledgeBaseCid, uniqueRequestContext);
+
+    // Validate verification result
+    if (!verificationResult) {
+        throw new Error("Verification service returned null result.");
+    }
+    console.log(`[Verify Controller][${uniqueRequestContext}] Verification Result Status: ${verificationResult.finalVerdict}`);
     if (verificationResult.finalVerdict.startsWith('Error:')) {
-        console.warn(`[Verify Controller] Verification ended with status: ${verificationResult.finalVerdict}`);
+        // Log warning but don't throw, return the error status in the response
+        console.warn(`[Verify Controller][${uniqueRequestContext}] Verification process ended with status: ${verificationResult.finalVerdict}`);
     }
 
-    // Step 3: Prepare SUCCESS response
-    // Ensure properties match the ApiVerifyResponse interface in types/index.ts
-    const responsePayloadRaw: Partial<ApiVerifyResponse> = {
-      answer: generatedClaim, // This endpoint returns the CLAIM as 'answer'
+
+    // Step 3: Prepare SUCCESS response payload carefully matching ApiVerifyResponse
+    // Initialize with required fields or defaults
+    const responsePayload: ApiVerifyResponse = {
+      answer: generatedClaim, // Sync endpoint returns CLAIM as answer
       status: verificationResult.finalVerdict,
       confidence: verificationResult.confidenceScore,
       usedFragmentCids: verificationResult.usedFragmentCids,
       timelockRequestId: verificationResult.timelockRequestId,
       timelockTxExplorerUrl: verificationResult.timelockCommitTxHash ? getL2ExplorerUrl(verificationResult.timelockCommitTxHash) : undefined,
-      recallTrace: verificationResult.reasoningSteps, // Uses reasoningSteps from VerificationResultInternal
+      recallTrace: verificationResult.reasoningSteps, // Include reasoning steps if available and desired
       requestContext: uniqueRequestContext,
+      // Ensure optional error fields are omitted on success
+      error: undefined,
+      details: undefined,
     };
 
-    // Remove undefined fields using type assertion in reduce
-    const responsePayload = Object.entries(responsePayloadRaw).reduce((acc, [key, value]) => {
+    // Clean payload (remove undefined keys) - This is good practice
+    const finalPayload = Object.entries(responsePayload).reduce((acc, [key, value]) => {
         if (value !== undefined) {
-            // Assert key is a keyof ApiVerifyResponse before assigning
             (acc as any)[key as keyof ApiVerifyResponse] = value;
         }
         return acc;
-    }, {} as Partial<ApiVerifyResponse>) as ApiVerifyResponse;
+    }, {} as Partial<ApiVerifyResponse>);
 
-    console.log(`[Verify Controller] Sending Sync Response | Status: ${responsePayload.status}`);
-    res.status(200).json(responsePayload);
+
+    console.log(`[Verify Controller][${uniqueRequestContext}] Sending Sync Response | Status: ${finalPayload.status}`);
+    // --- FIX: Add return ---
+    return res.status(200).json(finalPayload);
 
   } catch (error: any) {
     const conciseError = error instanceof Error ? error.message.split('\n')[0] : String(error);
-    console.error(`[Verify Controller Error] Context: ${uniqueRequestContext} | Error: ${conciseError}`);
+    console.error(`[Verify Controller Error][${uniqueRequestContext}]: Sync process failed! Error: ${conciseError}`);
 
-    // Log error using unified service
-    // logErrorEvent({ controllerError: conciseError, stage: 'VerifyControllerCatch' }, uniqueRequestContext).catch(/* ignore background log fail */);
+    // Log error using recallService if available and configured
+    // try {
+    //     await logErrorEvent({ controllerError: conciseError, stage: 'VerifyControllerCatch' }, uniqueRequestContext);
+    // } catch (logErr: any) {
+    //      console.error(`[Verify Controller][${uniqueRequestContext}] FAILED TO LOG CONTROLLER ERROR TO RECALL:`, logErr.message);
+    // }
 
-    const finalAnswerInError = (typeof generatedClaim === 'string' && generatedClaim !== "Processing...") ? generatedClaim : "Claim Generation Failed";
-    const finalStatusInError = verificationResult?.finalVerdict?.startsWith('Error:')
-        ? verificationResult.finalVerdict
-        : 'Error: Verification Failed';
+    // Determine best "answer" and "status" for the error response
+    const finalAnswerInError = (typeof generatedClaim === 'string' && !generatedClaim.startsWith('Error:')) ? generatedClaim : "Claim Generation/Processing Failed";
+    const finalStatusInError = verificationResult?.finalVerdict?.startsWith('Error:') ? verificationResult.finalVerdict : 'Error: Verification Failed';
 
-    // Prepare Error response
-    const simpleErrorResponseRaw: Partial<ApiVerifyResponse> = {
+    // Prepare Error response payload carefully matching ApiVerifyResponse
+    const errorResponsePayload: ApiVerifyResponse = {
         answer: finalAnswerInError,
         status: finalStatusInError,
-        error: 'Verification processing error.',
-        details: conciseError,
-        confidence: verificationResult?.confidenceScore,
-        timelockRequestId: verificationResult?.timelockRequestId,
+        error: 'Verification processing error.', // General error type
+        details: conciseError, // Specific error message
+        confidence: verificationResult?.confidenceScore, // Include if available
+        timelockRequestId: verificationResult?.timelockRequestId, // Include if available
         requestContext: uniqueRequestContext,
-        recallTrace: verificationResult?.reasoningSteps, // Use reasoningSteps
+        recallTrace: verificationResult?.reasoningSteps, // Include steps if available
+        usedFragmentCids: verificationResult?.usedFragmentCids, // Include if available
+        timelockTxExplorerUrl: verificationResult?.timelockCommitTxHash ? getL2ExplorerUrl(verificationResult.timelockCommitTxHash) : undefined,
     };
 
-    // Use type assertion in reduce for error response as well
-    const simpleErrorResponse = Object.entries(simpleErrorResponseRaw).reduce((acc, [key, value]) => {
-         if (value !== undefined) {
-             (acc as any)[key as keyof ApiVerifyResponse] = value;
-         }
+     // Clean payload (remove undefined keys)
+     const finalErrorPayload = Object.entries(errorResponsePayload).reduce((acc, [key, value]) => {
+         if (value !== undefined) { (acc as any)[key as keyof ApiVerifyResponse] = value; }
          return acc;
      }, {} as Partial<ApiVerifyResponse>);
 
+
     if (!res.headersSent) {
-        res.status(500).json(simpleErrorResponse);
+        // --- FIX: Add return ---
+        return res.status(500).json(finalErrorPayload);
     } else {
-        console.error(`[Verify Controller Error] Headers already sent for context ${uniqueRequestContext}`);
+        console.error(`[Verify Controller Error][${uniqueRequestContext}] Headers already sent, cannot send error response.`);
+        // Cannot return res here, but error is logged. Maybe call next(error)?
+        // next(error); // Pass to global handler if headers sent (though ideally shouldn't happen)
     }
   }
 }
-// ==== ./src/controllers/verifyController.ts ====
