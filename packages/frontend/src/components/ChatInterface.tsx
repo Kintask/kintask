@@ -81,7 +81,6 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
      setKnowledgeBaseFile(null);
      setUserEmail(''); // Clear email when file removed
      if(fileInputRef.current) { fileInputRef.current.value = ''; }
-     addSystemMessage("File selection removed.");
      inputRef.current?.focus();
    }
 

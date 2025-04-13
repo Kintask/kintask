@@ -193,7 +193,6 @@ function App() {
         if (signerAddress) {
             const checksumAddress = ethers.getAddress(signerAddress);
             setWalletAddress(checksumAddress);
-            addSystemMessage(`Wallet ${checksumAddress.substring(0, 6)}...${checksumAddress.substring(checksumAddress.length - 4)} connected.`);
             loadHistory(checksumAddress);
         } else { addSystemMessage("⚠️ Could not retrieve wallet address after connection."); }
       } catch (error: any) {
@@ -217,48 +216,132 @@ function App() {
       setWalletAddress(null); setUserHistory([]); setShowHistoryList(false);
       setSelectedHistoryDetail(null); setPendingRequests(new Map());
       setMessages(prev => [prev[0]]); // Keep only initial welcome message
-      addSystemMessage(`Wallet ${address.substring(0, 6)}... disconnected.`);
   }, [walletAddress, addSystemMessage]);
 
 
   // --- Main Handler for triggering Backend Verification ---
-  // This function is passed to ChatInterface's `onSendMessage` prop
-  const handleSubmitForVerification = useCallback(async (question: string, knowledgeBaseCid: string) => {
-    // Validation
-    if (!question || !knowledgeBaseCid) { console.error("[App] Submit handler missing data!"); addSystemMessage("⛔ Error: Missing question or KB CID."); return; }
-    if (!(knowledgeBaseCid.startsWith('Qm') || knowledgeBaseCid.startsWith('baf'))) { console.error(`[App] Invalid CID format: ${knowledgeBaseCid}`); addSystemMessage(`⛔ Error: Invalid KB CID format.`); return; }
-    if (isSubmitting) { console.warn("[App] Ignoring duplicate submission."); return; }
-    if (!walletAddress) { addSystemMessage("⚠️ Please connect wallet to submit verifiable queries."); connectWallet(); return; }
+    // --- Main Handler for triggering Backend Verification ---
+    const handleSubmitForVerification = useCallback(async (question: string, knowledgeBaseCid: string) => {
+      // Validation
+      if (!question || !knowledgeBaseCid) { /* ... */ return; }
+      if (!(knowledgeBaseCid.startsWith('Qm') || knowledgeBaseCid.startsWith('baf'))) { /* ... */ return; }
+      if (isSubmitting) { /* ... */ return; }
+      // Keep wallet check commented out if allowing submission without wallet for now
+      // if (!walletAddress) { addSystemMessage("⚠️ Please connect wallet..."); connectWallet(); return; }
 
-    setIsSubmitting(true);
+      setIsSubmitting(true);
 
-    // Add User Message via callback
-    const userTimestamp = Date.now();
-    const userMessageText = `${question}\n(Verifying with KB CID: ${knowledgeBaseCid.substring(0, 10)}...)`;
-    addOrUpdateMessage({ id: userTimestamp, sender: 'User', text: userMessageText, apiResponse: null });
+      // Add User Message
+      const userTimestamp = Date.now();
+      const userMessageText = `${question}\n(Verifying with KB CID: ${knowledgeBaseCid.substring(0, 10)}...)`;
+      addOrUpdateMessage({ id: userTimestamp, sender: 'User', text: userMessageText, apiResponse: null });
 
-    addSystemMessage(`Submitting request for backend verification...`);
+      // --- FIX: Add AI Loading Placeholder Message ---
+      const loadingMessageId = userTimestamp + 1; // Create a unique ID for the loader
+      addOrUpdateMessage({
+          id: loadingMessageId,
+          sender: 'AI',
+          text: '', // Empty text initially
+          isLoading: true, // Flag to show spinner in MessageBubble
+          apiResponse: { status: 'Processing', answer: '' } as Partial<ApiVerifyResponse> // Indicate processing status
+      });
+      // --- End Fix ---
 
-    // Call apiService.askQuestion
-    const response = await askQuestion(question, knowledgeBaseCid);
+      // Add submitting system message (optional, could rely on spinner)
+      // addSystemMessage(`Submitting request for backend verification...`); // You can keep or remove this
 
-    // Handle acknowledgement response
-     if ('isError' in response && response.isError) {
-         console.error("[App] Backend Submission Failed:", response.error, response.details);
-         addSystemMessage(`⛔ Backend submission failed: ${response.error || 'Unknown error'}`);
-     } else if (response.requestContext) {
-         console.log("[App] Backend Submission Acknowledged:", response);
-         addSystemMessage(`✅ Request submitted (ID: ${response.requestContext.substring(4,10)}). Polling for results...`, response.requestContext, 'Pending Verification');
-         setPendingRequests(prev => new Map(prev).set(response.requestContext, { question, kbCid: knowledgeBaseCid }));
-         savePendingHistoryEntry(response.requestContext, question, knowledgeBaseCid);
-     } else {
+      // Call apiService.askQuestion
+      const response = await askQuestion(question, knowledgeBaseCid, walletAddress);
+
+      // Handle acknowledgement response
+      if ('isError' in response && response.isError) {
+          console.error("[App] Backend Submission Failed:", response.error, response.details);
+          addSystemMessage(`⛔ Backend submission failed: ${response.error || 'Unknown error'}`);
+          // *** Update the loading message to show error ***
+          addOrUpdateMessage({
+              id: loadingMessageId, // Use the same ID to update
+              sender: 'AI',
+              text: `Error submitting request: ${response.error || 'Unknown'}`,
+              isLoading: false, // Stop loading spinner
+              apiResponse: { status: 'Error: Verification Failed', answer: '', error: response.error, details: response.details }
+          });
+      } else if (response.requestContext) {
+          console.log("[App] Backend Submission Acknowledged:", response);
+          // *** Update the loading message to indicate polling ***
+          // Or potentially remove it and rely on system message + future final result
+          addOrUpdateMessage({
+              id: loadingMessageId, // Use the same ID
+              sender: 'AI',
+              text: `Request received (ID: ${response.requestContext.substring(4,10)}). Waiting for final verification...`,
+              isLoading: false, // Stop initial spinner
+              apiResponse: { status: 'Pending Verification', answer: '' }, // Update status
+              requestContext: response.requestContext // Add context ID
+          });
+          // addSystemMessage(`✅ Request submitted (ID: ${response.requestContext.substring(4,10)}). Polling for results...`, response.requestContext, 'Pending Verification'); // System message might be redundant now
+          setPendingRequests(prev => new Map(prev).set(response.requestContext, { question, kbCid: knowledgeBaseCid }));
+          if (walletAddress) {
+              savePendingHistoryEntry(response.requestContext, question, knowledgeBaseCid);
+          }
+      } else {
           console.error("[App] Backend acknowledgement missing requestContext:", response);
           addSystemMessage(`⛔ Backend error: Submission acknowledged but missing request ID.`);
-     }
-     setIsSubmitting(false); // End submitting state after acknowledgement
+          // *** Update loading message to show this error ***
+          addOrUpdateMessage({
+              id: loadingMessageId,
+              sender: 'AI',
+              text: `Error: Backend acknowledged but missing request ID.`,
+              isLoading: false,
+              apiResponse: { status: 'Error: Verification Failed', answer: '', error: 'Missing requestContext' }
+          });
+      }
+      setIsSubmitting(false); // End submitting state after acknowledgement
 
-  }, [isSubmitting, walletAddress, addSystemMessage, savePendingHistoryEntry, addOrUpdateMessage, connectWallet]); // Added dependencies
+  }, [isSubmitting, walletAddress, addSystemMessage, savePendingHistoryEntry, addOrUpdateMessage, connectWallet]);
 
+
+  // --- Status Checking Logic ---
+  useEffect(() => {
+      if (pendingRequests.size === 0 || !walletAddress) return;
+
+      const intervalId = setInterval(async () => {
+          // ... (polling logic remains the same) ...
+           const checkPromises = Array.from(pendingRequests.entries()).map(async ([contextId, queryInfo]) => {
+               try {
+                   const result = await getVerificationResult(contextId, queryInfo);
+                   if (!('isError' in result) && result.status !== 'Processing' && result.status !== 'Pending Verification') {
+                       // Final status received
+                       const finalAiMessage: ChatMessage = {
+                           id: Date.now() + Math.random(), // New ID for final answer
+                           sender: 'AI',
+                           text: result.answer,
+                           apiResponse: result,
+                           requestContext: contextId
+                       };
+                       // *** Replace any existing placeholder/status message for this context ***
+                       setMessages(prev => [
+                           ...prev.filter(m => m.requestContext !== contextId || m.sender === 'User'), // Keep user msg, remove old AI/System msgs for this context
+                           finalAiMessage // Add the new final AI message
+                       ]);
+                       updateHistoryEntryWithResult(contextId, finalAiMessage);
+                       setPendingRequests(prev => { const next = new Map(prev); next.delete(contextId); return next; });
+                   } else if ('isError' in result) {
+                       // Handle polling error
+                       console.error(`[Status Check] Error polling ${contextId}:`, result.error);
+                       // Optionally update UI to show polling error
+                       // addSystemMessage(`⚠️ Error polling status for ID ${contextId.substring(4,10)}...`, contextId);
+                   } else {
+                       // Still processing - optional UI update
+                       console.log(`[Status Check] Request ${contextId} still processing.`);
+                   }
+               } catch (e) { console.error(`[Status Check] Unhandled error ${contextId}:`, e); }
+           });
+          await Promise.allSettled(checkPromises);
+      }, 15000);
+
+      return () => clearInterval(intervalId);
+
+  // Add setMessages to dependency array as it's used inside polling now
+  }, [pendingRequests, walletAddress, updateHistoryEntryWithResult, addOrUpdateMessage, setMessages]);
 
   // --- Status Checking Logic (Polling Example) ---
   useEffect(() => {
