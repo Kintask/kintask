@@ -10,7 +10,8 @@ import LoadingModal from './components/LoadingModal'; // Import LoadingModal
 import {
     askQuestion,
     getUserQuestions,
-    pollForResult
+    pollForResult,
+    checkEvaluationStatus
 } from './services/apiService';
 
 // Type Definitions
@@ -132,10 +133,10 @@ function App() {
             console.log(`[History] Received ${response.length} question entries.`);
             const initialPending = new Map<string, { question: string; kbCid: string; lastStatus?: VerificationStatus | string }>();
             const fetchedHistory: HistoryEntry[] = response
-                .map((qData): HistoryEntry | null => {
+                .map(async (qData): HistoryEntry | null => {
                     if (!qData?.requestContext || !qData.question || !qData.cid || !qData.status) return null;
-                    const isPendingStatus = !TERMINAL_STATUSES.includes(qData.status as VerificationStatus);
-                    if (isPendingStatus) {
+                    const isFinished = await checkEvaluationStatus(qData.requestContext);
+                    if (!isFinished) {
                         initialPending.set(qData.requestContext, { question: qData.question, kbCid: qData.cid, lastStatus: qData.status });
                     }
                     return {
@@ -143,7 +144,7 @@ function App() {
                         questionText: qData.question,
                         knowledgeBaseCid: qData.cid,
                         submissionTimestamp: qData.timestamp,
-                        finalResult: !isPendingStatus ? {
+                        finalResult: isFinished ? {
                              status: qData.status, requestContext: qData.requestContext,
                              question: qData.question, kbCid: qData.cid,
                         } : null,
@@ -242,11 +243,11 @@ function App() {
         setLoadingModalMessage("Submitting Request..."); // Initial modal message
         setLoadingModalSubMessage(undefined);
         setLoadingModalContextId(undefined);
-        // No setIsLoadingModalVisible(true) here yet, wait for API response
-
+        
         const userTimestamp = Date.now();
         // Add User Message to chat
         addOrUpdateMessage({ id: userTimestamp, sender: 'User', text: `${question}\n(KB: ${knowledgeBaseCid.substring(0, 10)}...)` });
+        setIsLoadingModalVisible(true)
         setLoadingModalContextId(userTimestamp.toString());
 
         setLoadingModalSubMessage(`${question}\n(KB: ${knowledgeBaseCid.substring(0, 10)}...)`);
@@ -352,6 +353,7 @@ function App() {
                                 // Hide modal if it was for this failed request
                                 if (isLoadingModalVisible && loadingModalContextId === contextId) {
                                     setIsLoadingModalVisible(false);
+                                    setIsApiCallInProgress(false);
                                 }
                             } else { // Success path (intermediate or final)
                                 // Assuming 'result' contains the backend response including status and the new flag
@@ -370,6 +372,8 @@ function App() {
                                 if (result.evaluationFileExists === true) {
                                     console.log("Evaluation file exists, closing loading modal."); // Optional logging
                                     setIsLoadingModalVisible(false);
+                                    setIsApiCallInProgress(false);
+
                                 }
 
                                 // Commented out: Condition to close modal on PendingPayout is removed as requested
@@ -415,6 +419,7 @@ function App() {
                                         console.log(`[Polling] Removed ${contextId.substring(0,10)} from pending. Remaining: ${next.size}`);
                                         return next;
                                     });
+
                                 } else {
                                     // Still processing, update status if changed
                                     if (queryInfo.lastStatus !== currentStatus) {
@@ -433,6 +438,7 @@ function App() {
                              // Hide modal on critical error
                              if (isLoadingModalVisible && loadingModalContextId === contextId) {
                                  setIsLoadingModalVisible(false);
+                                 setIsApiCallInProgress(false);
                              }
                         }
                     }
@@ -447,6 +453,8 @@ function App() {
             if (pollingIntervalRef.current) {
                 console.log("[Polling] Cleaning up polling interval.");
                 clearInterval(pollingIntervalRef.current);
+                setIsApiCallInProgress(false);
+                setIsLoadingModalVisible(false);
                 pollingIntervalRef.current = null;
             }
         };
@@ -532,7 +540,7 @@ function App() {
         <div className="flex flex-col h-screen max-w-5xl mx-auto p-4 md:p-6 bg-gradient-to-br from-gray-100 to-blue-100 dark:from-gray-900 dark:to-slate-800 relative font-sans overflow-hidden">
             {/* Loading Modal */}
             <LoadingModal
-                isVisible={isApiCallInProgress || isLoadingModalVisible}
+                isVisible={isLoadingModalVisible}
                 message={loadingModalMessage}
                 subMessage={loadingModalSubMessage}
                 contextId={loadingModalContextId}

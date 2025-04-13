@@ -11,7 +11,7 @@ export default defineConfig(({ mode }) => {
   // Determine backend URL (adjust if backend runs elsewhere)
   const backendPort = env.VITE_BACKEND_PORT || 3001;
   //const backendUrl = `http://localhost:${backendPort}`;
-  const backendUrl = "https://57c9-189-216-169-29.ngrok-free.app/"
+  const backendUrl = "https://57c9-189-216-169-29.ngrok-free.app"
   console.log(`[Vite Config] Proxying /api to backend at: ${backendUrl}`);
 
   return {
