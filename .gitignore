@@ -34,7 +34,7 @@ lerna-debug.log*
 
 
 packages/contracts/ignition/deployments/chain-314159/build-info
-packages/backend/src/contracts/abi
+# packages/backend/src/contracts/abi
 
 # OS generated files
 .DS_Store

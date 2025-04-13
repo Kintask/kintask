@@ -485,7 +485,7 @@ async function pollLoop() {
     } catch (error) { const errorMessage = error instanceof Error ? error.message : String(error); console.error("[Agent] Error processing String jobs:", errorMessage); }
 
     if (process.env.CONTINUOUS_POLLING === "true") {
-        const pollingInterval = parseInt(process.env.POLLING_INTERVAL || "30000", 10);
+        const pollingInterval = parseInt(process.env.POLLING_INTERVAL || "500000", 10);
         console.log(`[Agent] Continuous polling. Next poll in ${pollingInterval / 1000}s...`);
         setTimeout(pollLoop, pollingInterval);
     } else { console.log("[Agent] One-shot complete. Exiting."); process.exit(0); }
