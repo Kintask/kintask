@@ -552,7 +552,7 @@ function App() {
             </footer>
 
             {/* History Panel (List) - Conditionally render based on modal visibility too? */}
-             {walletAddress && showHistoryList && !isLoadingModalVisible && (
+             {walletAddress && showHistoryList && (
                 <div className="absolute top-16 right-4 w-72 max-h-[calc(100vh-10rem)] overflow-y-auto bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg shadow-xl p-3 z-30 animate-fade-in scrollbar-thin scrollbar-thumb-gray-300 dark:scrollbar-thumb-gray-600">
                      <div className="flex justify-between items-center mb-2 border-b pb-1.5 dark:border-gray-600 sticky top-0 bg-white dark:bg-gray-800 z-10 px-1 -mx-1">
                          <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-200">Query History</h3>
@@ -596,7 +596,7 @@ function App() {
             )}
 
             {/* History Detail Modal - Conditionally render based on modal visibility */}
-             {selectedHistoryDetail && !isLoadingModalVisible && (
+             {selectedHistoryDetail && (
                  <div className="fixed inset-0 bg-black bg-opacity-60 dark:bg-opacity-75 flex justify-center items-center p-4 z-50 backdrop-blur-sm animate-fade-in" onClick={closeHistoryDetail} >
                      <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl p-5 md:p-6 max-w-2xl w-full max-h-[90vh] overflow-y-auto scrollbar-thin scrollbar-thumb-gray-400 dark:scrollbar-thumb-gray-600" onClick={(e) => e.stopPropagation()} >
                          {/* Modal Header */}
