@@ -303,6 +303,7 @@ function App() {
         // Stop condition
         if (pendingRequests.size === 0 || !walletAddress) {
             if (pollingIntervalRef.current) {
+                setIsApiCallInProgress(false);
                 console.log("[Polling] Stopping interval (no pending requests or wallet disconnected).");
                 clearInterval(pollingIntervalRef.current);
                 pollingIntervalRef.current = null;
@@ -313,7 +314,7 @@ function App() {
             }
             return;
         }
-
+        setIsApiCallInProgress(true);
         // Start interval if not already running
         if (!pollingIntervalRef.current) {
             console.log(`[Polling] Starting polling interval for ${pendingRequests.size} request(s)...`);
@@ -355,7 +356,6 @@ function App() {
                             } else { // Success path (intermediate or final)
                                 const currentStatus = result.status as VerificationStatus;
                                 const isTerminal = TERMINAL_STATUSES.includes(currentStatus);
-
                                 // Update Loading Modal if visible and matches context
                                 if (isLoadingModalVisible && loadingModalContextId === contextId) {
                                     if (isTerminal) {
@@ -502,7 +502,7 @@ function App() {
         <div className="flex flex-col h-screen max-w-5xl mx-auto p-4 md:p-6 bg-gradient-to-br from-gray-100 to-blue-100 dark:from-gray-900 dark:to-slate-800 relative font-sans overflow-hidden">
             {/* Loading Modal */}
             <LoadingModal
-                isVisible={isApiCallInProgress}
+                isVisible={isApiCallInProgress || isLoadingModalVisible}
                 message={loadingModalMessage}
                 subMessage={loadingModalSubMessage}
                 contextId={loadingModalContextId}
