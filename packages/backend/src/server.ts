@@ -36,7 +36,7 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 app.use('/api', verifyRoutes); // Mount verify routes under /api
 app.use('/api', askRoutes);    // Mount ask routes under /api
 app.use('/api', statusRoutes); // Mount status routes under /api
-app.use('/api', questionsRoutes); // Mount status routes under /api
+app.use('/api/questions', questionsRoutes);
 app.use('/api', evaluationRoutes);
 
 

@@ -63,7 +63,7 @@ export async function askQuestion(question: string, knowledgeBaseCid: string, us
     console.log(`[API Service - askQuestion] Submitting REAL request...`);
     if (!trimmedQuestion) { return { isError: true, error: "Question cannot be empty." }; }
     if (!trimmedKnowledgeBaseCid || !(trimmedKnowledgeBaseCid.startsWith('Qm') || trimmedKnowledgeBaseCid.startsWith('bafy') || trimmedKnowledgeBaseCid.startsWith('bafk'))) { return { isError: true, error: "Invalid/missing KB CID format." }; }
-    const requestBody = { question: trimmedQuestion, knowledgeBaseCid: trimmedKnowledgeBaseCid };
+    const requestBody = { question: trimmedQuestion, knowledgeBaseCid: trimmedKnowledgeBaseCid, user };
     try {
         const response = await axios.post<AskApiResponse>(`${API_BASE_URL}/ask`, requestBody, { timeout: 30000, headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' } });
         if (!response.data || typeof response.data.message !== 'string' || typeof response.data.requestContext !== 'string' || typeof response.data.recallKey !== 'string') { return { isError: true, error: "Unexpected server response structure.", details: JSON.stringify(response.data) }; }
