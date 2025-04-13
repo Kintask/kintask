@@ -242,7 +242,7 @@ function App() {
         addSystemMessage("⛔ Error: Missing question or KB CID for verification.");
         return;
     }
-    if (!(knowledgeBaseCid.startsWith('Qm') || knowledgeBaseCid.startsWith('bafy'))) {
+    if (!(knowledgeBaseCid.startsWith('Qm') || knowledgeBaseCid.startsWith('baf'))) {
          console.error(`[App] Invalid CID format: ${knowledgeBaseCid}`);
          addSystemMessage(`⛔ Error: Invalid KB CID format.`);
          return;

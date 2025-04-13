@@ -97,7 +97,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({
         return;
     }
     const hasFile = !!knowledgeBaseFile;
-    const hasValidPastedCid = !!trimmedPastedCid && /^(Qm|baf|baf)[a-zA-Z0-9]{40,}/.test(trimmedPastedCid);
+    const hasValidPastedCid = !!trimmedPastedCid && /^(Qm|baf)[a-zA-Z0-9]{40,}/.test(trimmedPastedCid);
 
     if (!hasFile && !hasValidPastedCid) {
          // *** Use addSystemMessage prop ***
