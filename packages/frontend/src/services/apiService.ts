@@ -16,6 +16,17 @@ import {
 const API_BASE_URL = '/api'; // For real API calls (uses Vite proxy)
 const DEFAULT_TIMEOUT = 600000; // Default timeout for requests
 
+// Create a base axios instance with common headers
+const apiClient = axios.create({
+    baseURL: API_BASE_URL,
+    timeout: DEFAULT_TIMEOUT,
+    headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+        'ngrok-skip-browser-warning': 'true' // Added to bypass ngrok warning
+    }
+});
+
 // --- Helper for Error Handling ---
 function formatError(error: any, context?: string): ApiErrorResponse {
     const axiosError = error as AxiosError<any>;
@@ -52,10 +63,7 @@ export async function askQuestion(question: string, knowledgeBaseCid: string, us
     const requestBody = { question: trimmedQuestion, knowledgeBaseCid: trimmedKnowledgeBaseCid, user }; // Match backend payload { question, cid, user }
     try {
         // IMPORTANT: Ensure this endpoint matches your backend route (e.g., /api/ask or /api/verify)
-        const response = await axios.post<AskQuestionResponse>(`${API_BASE_URL}/verify`, requestBody, {
-             timeout: DEFAULT_TIMEOUT,
-             headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' }
-        });
+        const response = await apiClient.post<AskQuestionResponse>(`/ask`, requestBody);
         // Validate expected fields in success response
         if (!response.data || typeof response.data !== 'object' || typeof response.data.requestContext !== 'string') {
              console.error("[API Service - askQuestion] Unexpected success response structure:", response.data);
@@ -88,10 +96,7 @@ export async function getUserQuestions(user: string): Promise<QuestionData[] | A
      if (!user || typeof user !== 'string') return { isError: true, error: "Valid user address is required." };
     try {
         console.log(`[API Service] GET /api/questions/user/${user.substring(0,10)}...`);
-        const response = await axios.get<QuestionData[]>(`${API_BASE_URL}/questions/user/${encodeURIComponent(user)}`, {
-            timeout: DEFAULT_TIMEOUT,
-            headers: { 'Accept': 'application/json' }
-        });
+        const response = await apiClient.get<QuestionData[]>(`/questions/user/${encodeURIComponent(user)}`);
         console.log(response)
         if (!Array.isArray(response.data)) {
              throw new Error("Invalid history response format from backend: Expected an array.");
@@ -111,10 +116,7 @@ export async function fetchAnswersForQuestion(contextId: string): Promise<Answer
      if (!contextId) return { isError: true, error: "Request context ID is required." };
     try {
         console.log(`[API Service] GET /api/answers/${contextId}`);
-        const response = await axios.get<AnswerData[]>(`${API_BASE_URL}/answers/${encodeURIComponent(contextId)}`, {
-            timeout: DEFAULT_TIMEOUT,
-            headers: { Accept: 'application/json' }
-        });
+        const response = await apiClient.get<AnswerData[]>(`/answers/${encodeURIComponent(contextId)}`);
          if (!Array.isArray(response.data)) {
              throw new Error("Invalid answers response format from backend: Expected an array.");
          }
@@ -139,10 +141,7 @@ export async function fetchEvaluationData(contextId: string): Promise<Evaluation
      if (!contextId) return { isError: true, error: "Request context ID is required." };
     try {
         console.log(`[API Service] GET /api/evaluation-data/${contextId}`);
-        const response = await axios.get<EvaluationData>(`${API_BASE_URL}/evaluation-data/${encodeURIComponent(contextId)}`, {
-            timeout: DEFAULT_TIMEOUT,
-            headers: { Accept: 'application/json' }
-        });
+        const response = await apiClient.get<EvaluationData>(`/evaluation-data/${encodeURIComponent(contextId)}`);
          // Basic validation
          if (!response.data || typeof response.data !== 'object' || !response.data.requestContext) {
               throw new Error("Invalid evaluation data response format from backend.");
@@ -171,12 +170,8 @@ export async function checkEvaluationStatus(contextId: string): Promise<{ evalua
     try {
       console.log(`[API Service] GET /api/check-evaluation/${contextId}`);
       // Assume backend returns { evaluated: boolean, message: string, status?: string }
-      const response = await axios.get<{ evaluated: boolean; message: string, status?: string }>(
-        `${API_BASE_URL}/check-evaluation/${encodeURIComponent(contextId)}`,
-        {
-          timeout: DEFAULT_TIMEOUT,
-          headers: { Accept: 'application/json' },
-        }
+      const response = await apiClient.get<{ evaluated: boolean; message: string, status?: string }>(
+        `/check-evaluation/${encodeURIComponent(contextId)}`
       );
        if (typeof response.data?.evaluated !== 'boolean') {
             throw new Error("Invalid check-evaluation response structure from backend.");

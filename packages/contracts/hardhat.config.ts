@@ -20,7 +20,7 @@ const SUBMITTER_PK = process.env.SUBMITTER_PK || "";
 
 // API Keys and RPC URLs
 const FILSCAN_API_KEY = process.env.FILSCAN_API_KEY || ""; // Default to empty string
-const CALIBRATION_RPC_URL = process.env.CALIBRATION_RPC_URL || "https://api.calibration.node.glif.io/rpc/v1";
+const CALIBRATION_RPC_URL =  "https://api.calibration.node.glif.io/rpc/v1";
 const CALIBRATION_NETWORK_KEY = "calibration";
 const CALIBRATION_CHAIN_ID = 314159;
 const CALIBRATION_FILSCAN_API_URL = "https://api-calibration.filscan.io/api/v1";

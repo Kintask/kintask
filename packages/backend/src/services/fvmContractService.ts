@@ -107,69 +107,103 @@ async function findEventArgsInReceipt(receipt: ethers.ContractReceipt, contractI
     console.warn(`[FVM Service] Event '${eventName}' with argument '${argName}' not found in transaction logs after manual parse.`);
     return null;
 }
-
-// Function to robustly find UID, preferring generic EAS event
+/**
+ * Searches a transaction receipt for an EAS "Attested" event matching a specific schema
+ * and extracts the UID from that event.
+ *
+ * @param {object} receipt - The transaction receipt (should have receipt.logs).
+ * @param {string} targetSchemaUID - The expected schema UID (hex string) we want to match.
+ * @param {ethers.utils.Interface} easInterface - The ethers Interface for the EAS ABI.
+ * @param {string} easAddr - The EAS Contract Address.
+ * @returns {Promise<string|null>} - The UID if found, or null if not.
+ */
 async function findUIDFromReceipt(
-    receipt: ContractReceipt,
-    targetSchemaUID: string, // Schema UID of the attestation we're looking for
-    easInterface: ethers.utils.Interface, // EAS ABI Interface (ethers v5)
-    easAddr: string // EAS Contract Address
-): Promise<string | null> {
+    receipt: any,
+    targetSchemaUID: any,
+    easInterface: any,
+    easAddr:any 
+  ) {
     console.log(`[FVM UID Helper] Searching logs for EAS Attested event matching schema ${targetSchemaUID}...`);
-    const eventSignatureHash = ethers.utils.id("Attested(address,address,bytes32,bytes32)"); // Hash for standard EAS Attested event
-
-    for (const log of receipt.logs || []) {
-        // Check Address and Topic 0 (Event Signature)
-        if (log.address.toLowerCase() === easAddr.toLowerCase() && log.topics[0] === eventSignatureHash) {
-            // Check Topic 3 (Schema UID - indexed[2] in a 0-indexed array)
-            // Ensure topics array has enough elements
-            if (log.topics.length > 3 && log.topics[3].toLowerCase() === targetSchemaUID.toLowerCase()) {
-                 console.log(`[FVM UID Helper] Found potential Attested event with matching schema.`);
-                 // The UID is the **third** indexed topic (topics[0] is signature hash)
-                 // Ethers Interface.parseLog SHOULD put indexed topics in args by index/name,
-                 // but sometimes accessing topics directly is more reliable if parsing fails.
-                 // Let's try parsed args first, then fallback to topic.
-                 let uid: string | null = null;
-                 try {
-                     const parsed = easInterface.parseLog(log);
-                     if (parsed.name === "Attested") { // Double check name just in case
-                          uid = parsed.args.uid; // Try accessing by name
-                          // Fallback to index if name access fails (shouldn't usually happen)
-                          if (!uid && parsed.args[2]) uid = parsed.args[2];
-                     }
-                 } catch (parseError) {
-                      console.warn("[FVM UID Helper] Error parsing log with EAS interface, attempting direct topic access.", parseError);
-                 }
-
-                 // If parsing failed or didn't yield UID, try direct topic access
-                 // The UID is indexed[2] -> topics[3]
-                 if (!uid && log.topics.length > 3) {
-                     uid = log.topics[2]; // **Correction: UID is Topic 2 (indexed[1])** wait, let me re-check EAS source...
-                     // *** Correction: Standard EAS Attested indexes recipient[1], attester[2], uid[3] ***
-                     // So uid should be topics[3] if it's the 3rd indexed param. Let's stick with parsed.args first.
-                     // Let's retry the direct topic index based on standard event:
-                     // topics[0]=sig, topics[1]=recipient, topics[2]=attester, topics[3]=uid
-                     if (log.topics.length > 3) {
-                         uid = log.topics[3];
-                         console.log(`[FVM UID Helper] Using UID from direct topic access: log.topics[3]`);
-                     }
-                 }
-
-
-                 // Final validation of the extracted UID
-                 if (uid && uid !== ethers.constants.HashZero) {
-                      console.log(`[FVM UID Helper] Successfully extracted UID: ${uid}`);
-                      return uid;
-                 } else {
-                      console.warn(`[FVM UID Helper] Found matching Attested event but extracted UID was invalid or zero hash (UID: ${uid}).`);
-                 }
-            }
+  
+    // Calculate the event signature hash for the standard EAS Attested event.
+    const eventSignatureHash = ethers.utils.id("Attested(address,address,bytes32,bytes32)");
+    console.log(`[FVM UID Helper] Expected Attested event signature hash: ${eventSignatureHash}`);
+  
+    // Iterate over each raw log in the receipt.
+    const logs = receipt.logs || [];
+    console.log(`[FVM UID Helper] Found ${logs.length} raw logs in receipt.`);
+    for (const [i, log] of logs.entries()) {
+      console.log(`\n[FVM UID Helper] Processing raw log #${i + 1}:`);
+      console.log(`   Log Address: ${log.address}`);
+      console.log(`   Log Topics: ${JSON.stringify(log.topics)}`);
+      console.log(`   Log Data: ${log.data}`);
+  
+      // Check that the log comes from the expected EAS contract and has the expected event signature.
+      if (log.address.toLowerCase() !== easAddr.toLowerCase()) {
+        console.log(`   Skipping: Log address does not match target EAS address (${easAddr}).`);
+        continue;
+      }
+      if (log.topics[0] !== eventSignatureHash) {
+        console.log(`   Skipping: Log topic[0] (${log.topics[0]}) does not match expected signature hash.`);
+        continue;
+      }
+  
+      // Check that the log has at least 4 topics, and that topic[3] (the schema UID) matches the target.
+      if (log.topics.length < 4) {
+        console.log(`   Skipping: Log does not have enough topics (found ${log.topics.length}).`);
+        continue;
+      }
+      const logSchemaUID = log.topics[3].toLowerCase();
+      console.log(`   Log schema (topic[3]): ${logSchemaUID}`);
+      if (logSchemaUID !== targetSchemaUID.toLowerCase()) {
+        console.log(`   Skipping: Log schema UID does not match target schema UID (${targetSchemaUID}).`);
+        continue;
+      }
+  
+      console.log(`[FVM UID Helper] Candidate Attested event log found (log #${i + 1}) with matching schema.`);
+      
+      // Attempt to parse the log using the provided interface.
+      let uid = null;
+      try {
+        const parsed = easInterface.parseLog(log);
+        console.log(`   Parsed log: ${JSON.stringify(parsed)}`);
+        if (parsed.name === "Attested") {
+          // Try to get the UID by its name.
+          uid = parsed.args.uid;
+          console.log(`   Extracted UID from parsed args (by name): ${uid}`);
+          // Fallback: if not available, try index (depending on how the ABI is defined).
+          if (!uid && parsed.args[2]) {
+            uid = parsed.args[2];
+            console.log(`   Extracted UID from parsed args (fallback index 2): ${uid}`);
+          }
+        } else {
+          console.log(`   Parsed event name "${parsed.name}" does not match "Attested".`);
         }
+      } catch (parseError) {
+        // console.warn(`[FVM UID Helper] Error parsing log with EAS interface: ${parseError.message!}`);
+      }
+  
+      // If parsing did not yield a valid UID, fall back to direct topic access.
+      if (!uid) {
+        // According to the standard EAS Attested event:
+        // topics[0] = event signature, topics[1] = recipient, topics[2] = attester, topics[3] = uid.
+        // We already validated that topics[3] matches the target schema. So we try to extract UID from topics[3].
+        uid = log.topics[3];
+        console.log(`[FVM UID Helper] Falling back to direct topic access. Extracted UID from log.topics[3]: ${uid}`);
+      }
+  
+      // Final check on the extracted UID.
+      if (uid && uid !== ethers.constants.HashZero) {
+        console.log(`[FVM UID Helper] SUCCESS: Extracted UID is valid: ${uid}`);
+        return uid;
+      } else {
+        console.warn(`[FVM UID Helper] Found matching Attested event but extracted UID is invalid or zero (UID: ${uid}).`);
+      }
     }
-    console.error(`[FVM UID Helper] UID not found in EAS Attested events for schema ${targetSchemaUID}.`);
-    return null; // Return null if not found
-}
-
+  
+    console.error(`[FVM UID Helper] UID not found in any EAS Attested events for schema ${targetSchemaUID}.`);
+    return null;
+  }
 // --- Initialization Logic ---
 // Initializes provider, wallet, and ALL contract instances defined in mappings
 async function initializeFvmServiceInternal(): Promise<boolean> {

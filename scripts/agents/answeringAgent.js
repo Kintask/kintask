@@ -481,7 +481,7 @@ async function pollLoop() {
     } catch (error) { const errorMessage = error instanceof Error ? error.message : String(error); console.error("[Agent] Error processing Recall jobs:", errorMessage); }
 
     try { // Process String Jobs
-         await processStringCapitalizationJobs();
+        //  await processStringCapitalizationJobs();
     } catch (error) { const errorMessage = error instanceof Error ? error.message : String(error); console.error("[Agent] Error processing String jobs:", errorMessage); }
 
     if (process.env.CONTINUOUS_POLLING === "true") {

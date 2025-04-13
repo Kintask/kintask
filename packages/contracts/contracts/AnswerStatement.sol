@@ -56,7 +56,7 @@ contract AnswerStatement is IStatement {
         bytes32 registeredUID = _schemaRegistry.register(SCHEMA_ABI, ISchemaResolver(address(0)), IS_REVOCABLE);
 
         // --- Use console.logBytes32 for bytes32 ---
-        console.log("AnswerStatement Constructor - Registering Schema...");
+    console.log("AnswerStatement Constructor - Registering Schema...");
         console.logBytes32(registeredUID); // Correct function for bytes32
         // --- End log ---
 
@@ -119,7 +119,7 @@ contract AnswerStatement is IStatement {
             statement.expirationTime != 0 &&
             block.timestamp >= statement.expirationTime
         ) return false;
-        // Add any other intrinsic checks specific to AnswerStatement if needed
+    // Add any other intrinsic checks specific to AnswerStatement if needed
         return true;
     }
 
