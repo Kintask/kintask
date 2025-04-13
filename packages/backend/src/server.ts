@@ -6,6 +6,8 @@ import verifyRoutes from './routes/verify'; // Assuming src/routes/verify.ts
 import askRoutes from './routes/ask';       // Assuming src/routes/ask.ts
 import statusRoutes from './routes/status'; // Assuming src/routes/status.ts
 import questionsRoutes from './routes/questions'; // Assuming src/routes/status.ts
+import answersRoutes from './routes/answers';
+
 // Import the new service start/stop functions
 import { startEvaluationPayoutService, stopEvaluationPayoutService } from './services/evaluationPayoutService'; // Assuming src/services/evaluationPayoutService.ts
 // Keep timelock service imports if still used elsewhere
@@ -38,6 +40,7 @@ app.use('/api', askRoutes);    // Mount ask routes under /api
 app.use('/api', statusRoutes); // Mount status routes under /api
 app.use('/api/questions', questionsRoutes);
 app.use('/api', evaluationRoutes);
+app.use('/api/answers', answersRoutes);
 
 
 // Root Route / Health Check

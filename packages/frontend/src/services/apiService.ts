@@ -9,6 +9,10 @@ import {
     RecallLogEntryData // Structure for trace logs
 } from '@/types'; // Adjust path as needed
 import { QuestionData } from '../types'; // or wherever your QuestionData interface is
+import { EvaluationResult } from '@/types';
+import { AnswerData} from '@/types'; 
+
+
 
 // --- Configuration ---
 const USE_MOCK_API = false; // Set true for mock data (but getVerificationResult will ignore this now)
@@ -163,6 +167,22 @@ export async function getUserQuestions(user: string): Promise<QuestionData[] | A
     }
     
 }
+export async function fetchEvaluationData(contextId: string): Promise<EvaluationResult | ApiErrorResponse> {
+    try {
+      const response = await axios.get<EvaluationResult>(`/api/evaluation-data/${encodeURIComponent(contextId)}`, {
+        timeout: 15000,
+        headers: { Accept: 'application/json' },
+      });
+      return response.data; // the entire object
+    } catch (error: any) {
+      // handle errors similar to your other methods
+      return {
+        isError: true,
+        error: 'Failed to fetch evaluation data.',
+        details: error?.message,
+      };
+    }
+  }
 
 
 /**
@@ -218,6 +238,39 @@ export async function checkEvaluationStatus(contextId: string): Promise<{ evalua
         error: errorMessage, 
         details: errorDetails 
       };
+    }
+  }
+
+
+  export async function fetchAnswersForQuestion(contextId: string): Promise<AnswerData[] | ApiErrorResponse> {
+    try {
+      const response = await axios.get<AnswerData[]>(`${API_BASE_URL}/answers/${encodeURIComponent(contextId)}`, {
+        timeout: 15000,
+        headers: { Accept: 'application/json' }
+      });
+      return response.data; // array of answers
+    } catch (error: any) {
+      let errorMessage = 'Failed to fetch answers.';
+      let errorDetails: string | undefined;
+  
+      if (axios.isAxiosError(error)) {
+        // handle the error as you do in your other calls
+        const axiosErr = error as AxiosError<any>;
+        if (axiosErr.code === 'ECONNABORTED' || axiosErr.message.toLowerCase().includes('timeout')) {
+          errorMessage = 'Timeout fetching answers.';
+        } else if (axiosErr.response) {
+          const status = axiosErr.response.status;
+          const data = axiosErr.response.data;
+          errorMessage = `Server error fetching answers (${status}).`;
+          errorDetails = JSON.stringify(data);
+        } else {
+          errorMessage = 'Network error: No response.';
+        }
+      } else {
+        errorMessage = `Unexpected error: ${String(error)}`;
+      }
+  
+      return { isError: true, error: errorMessage, details: errorDetails };
     }
   }
 // /src/services/apiService.ts

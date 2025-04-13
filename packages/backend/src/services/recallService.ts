@@ -656,6 +656,14 @@ export async function deleteObject(key: string): Promise<boolean> {
     catch (error: any) { if (!error.message?.includes('Not Found')) { console.error(`[Recall Service] Error deleting object ${key}:`, error.message); } return false; }
 }
 
+export async function getEvaluationData(requestContext: string): Promise<EvaluationResult | null> {
+    // Build the key, e.g. "reqs/<context>/evaluation.json"
+    const evaluationKey = getEvaluationKey(requestContext);
+    // Reuse your existing getObjectData<T>(key)
+    const evalData = await getObjectData<EvaluationResult>(evaluationKey);
+    return evalData; // will be null if not found
+  }
+
 /**
  * Checks if there is an evaluation.json for the given request context.
  * Returns true if found, false otherwise.
@@ -667,5 +675,60 @@ export async function isQuestionEvaluated(requestContext: string): Promise<boole
     const evalData = await getObjectData<EvaluationResult>(evalKey);
     return !!evalData; // if not null/undefined, means there's an evaluation
   }
+
+/**
+ * Fetches all AnswerData objects for a given requestContext (i.e. question).
+ * Returns an array of parsed answers. If none found, returns an empty array.
+ */
+export async function getAnswersForQuestion(contextId: string): Promise<AnswerData[]> {
+    let recall: any;
+    let bucketAddr: Address;
+  
+    try {
+      // 1) init recall, get the bucket address
+      recall = await getRecallClient(); 
+      bucketAddr = await findLogBucketAddressOrFail(recall);
+    } catch (error: any) {
+      console.error(`[Recall Service] getAnswersForQuestion: init error for ${contextId}:`, error.message);
+      return [];
+    }
+  
+    // 2) Query for all objects under prefix: `reqs/<contextId>/answers/`
+    const prefix = getAnswersPrefix(contextId); 
+      // e.g. "reqs/req_123abc/answers/"
+  
+    let objects: any[] = [];
+    try {
+      const { result } = await recall.bucketManager().query(bucketAddr, { prefix });
+      objects = result?.objects || [];
+    } catch (err: any) {
+      console.error(`[Recall Service] getAnswersForQuestion: error listing answers for ${contextId}:`, err.message);
+      return [];
+    }
+  
+    if (!objects.length) {
+      // no answer objects found
+      return [];
+    }
+  
+    const answers: AnswerData[] = [];
+    // 3) For each object key, fetch and parse
+    for (const obj of objects) {
+      if (!obj.key) continue;
+      try {
+        // Use your existing getObjectData helper:
+        const answerData = await getObjectData<AnswerData>(obj.key);
+        if (answerData) {
+          answers.push(answerData);
+        }
+      } catch (fetchError: any) {
+        console.warn(`[Recall Service] Skipping one answer fetch error at key ${obj.key}`, fetchError.message);
+      }
+    }
+  
+    return answers;
+  }
+  
+  
 
 // ==== ./services/recallService.ts ====
