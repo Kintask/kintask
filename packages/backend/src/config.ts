@@ -147,8 +147,8 @@ const loadedConfig: AppConfig = {
     nilaiApiUrl: process.env.NILAI_API_URL,
 
     // --- Gas Limits (Load from env or use defaults) ---
-    fvmGasLimitCreatePayment: parseInt(process.env.FVM_GAS_LIMIT_CREATE_PAYMENT || '30000000', 10),
-    fvmGasLimitCollectPayment: parseInt(process.env.FVM_GAS_LIMIT_COLLECT_PAYMENT || '50000000', 10),
+    fvmGasLimitCreatePayment: parseInt(process.env.FVM_GAS_LIMIT_CREATE_PAYMENT || '800000', 10),
+    fvmGasLimitCollectPayment: parseInt(process.env.FVM_GAS_LIMIT_COLLECT_PAYMENT || '800000', 10),
     fvmGasLimitValidateZKP: parseInt(process.env.FVM_GAS_LIMIT_VALIDATE_ZKP || '1500000', 10),
 };
 

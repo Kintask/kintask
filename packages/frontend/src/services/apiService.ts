@@ -27,6 +27,10 @@ const apiClient = axios.create({
     }
 });
 
+const ASK_REQUEST_TIMEOUT = 180000; // 180 seconds (3 minutes) - ADJUST THIS VALUE AS NEEDED
+
+
+
 // --- Helper for Error Handling ---
 function formatError(error: any, context?: string): ApiErrorResponse {
     const axiosError = error as AxiosError<any>;
@@ -50,31 +54,44 @@ function formatError(error: any, context?: string): ApiErrorResponse {
  * POST /api/ask (or /api/verify - ensure backend route matches)
  */
 export async function askQuestion(question: string, knowledgeBaseCid: string, user: string): Promise<AskQuestionResponse | ApiErrorResponse> {
-    const trimmedQuestion = question.trim();
-    const trimmedKnowledgeBaseCid = knowledgeBaseCid.trim();
-    console.log(trimmedKnowledgeBaseCid)
-    // --- REAL API LOGIC ---
-    console.log(`[API Service - askQuestion] Submitting request for user ${user.substring(0,6)}...`);
-    if (!trimmedQuestion) { return { isError: true, error: "Question cannot be empty." }; }
-    // Basic CID check
-    if (!trimmedKnowledgeBaseCid || !(trimmedKnowledgeBaseCid.startsWith('Qm') || trimmedKnowledgeBaseCid.startsWith('baf') )) {
-        return { isError: true, error: "Invalid or missing Knowledge Base CID format." };
-    }
-    const requestBody = { question: trimmedQuestion, knowledgeBaseCid: trimmedKnowledgeBaseCid, user }; // Match backend payload { question, cid, user }
-    try {
-        // IMPORTANT: Ensure this endpoint matches your backend route (e.g., /api/ask or /api/verify)
-        const response = await apiClient.post<AskQuestionResponse>(`/ask`, requestBody);
-        // Validate expected fields in success response
-        if (!response.data || typeof response.data !== 'object' || typeof response.data.requestContext !== 'string') {
-             console.error("[API Service - askQuestion] Unexpected success response structure:", response.data);
-             return { isError: true, error: "Unexpected server acknowledgement response structure. "+response.data.status, details: JSON.stringify(response.data) };
-        }
-        console.log("[API Service - askQuestion] Success:", response.data);
-        return response.data;
-    } catch (error: any) {
-        return formatError(error, `askQuestion`);
-    }
+  const trimmedQuestion = question.trim();
+  const trimmedKnowledgeBaseCid = knowledgeBaseCid.trim();
+
+  console.log(`[API Service - askQuestion] Submitting request for user ${user.substring(0,6)}...${user.substring(user.length-4)}`);
+  if (!trimmedQuestion) { return { isError: true, error: "Question cannot be empty." }; }
+  if (!trimmedKnowledgeBaseCid || !(trimmedKnowledgeBaseCid.startsWith('Qm') || trimmedKnowledgeBaseCid.startsWith('baf') )) {
+      return { isError: true, error: "Invalid or missing Knowledge Base CID format." };
+  }
+  const requestBody = { question: trimmedQuestion, knowledgeBaseCid: trimmedKnowledgeBaseCid, user };
+
+  try {
+      console.log(`[API Service - askQuestion] Sending POST to /ask with timeout ${ASK_REQUEST_TIMEOUT}ms`);
+      // IMPORTANT: Ensure this endpoint matches your backend route
+      const response = await apiClient.post<AskQuestionResponse>(
+          `/ask`,
+          requestBody,
+          {
+              timeout: ASK_REQUEST_TIMEOUT // *** Apply the specific, longer timeout HERE ***
+          }
+      );
+
+      // Validate expected fields in success response (requestContext is key)
+      if (!response.data || typeof response.data !== 'object' || typeof response.data.requestContext !== 'string') {
+           console.error("[API Service - askQuestion] Unexpected success response structure (missing requestContext?):", response.data);
+           // Ensure status is captured if available in the unexpected response
+           const responseStatus = response.data?.status ? ` Status: ${response.data.status}` : '';
+           return { isError: true, error: `Unexpected server acknowledgement response structure.${responseStatus}`, details: JSON.stringify(response.data) };
+      }
+
+      console.log("[API Service - askQuestion] Success (received acknowledgement):", response.data);
+      return response.data; // Return the acknowledgement { requestContext: "...", ... }
+
+  } catch (error: any) {
+      // formatError will now specifically check for timeout errors
+      return formatError(error, `askQuestion`);
+  }
 }
+
 
 /**
  * Fetches the status/result for a given request context ID.
