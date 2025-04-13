@@ -59,12 +59,13 @@ const txQueue: Array<() => Promise<any>> = [];
 
 // --- Constants & Prefixes ---
 const MAX_RPC_RETRIES = 100;
-const RETRY_DELAY_MS = 1500; 
+const RETRY_DELAY_MS = 1500;
 const CONTEXT_DATA_PREFIX = "reqs/"; //
 
 
-const MAX_PROXY_ERROR_RETRIES = 5; // How many times to retry specifically on Proxy/Fetch errors
+const MAX_PROXY_ERROR_RETRIES = 100; // How many times to retry specifically on Proxy/Fetch errors
 const PROXY_RETRY_DELAY_MS = 2500; // Delay between proxy error retries
+const BUCKET_ERROR = 100; // How many times to retry specifically on Proxy/Fetch errors
 
 
 // --- Key Generation Helpers ---
@@ -289,6 +290,7 @@ export async function logQuestion(
     question: string, // <<< Receives the RAW question string
     cid: string,
     requestContext: string,
+    user: string
 ): Promise<string | undefined> {
     console.log(`[Recall Service] Logging question for context: ${requestContext}`);
     const arbiterAddress = config.zkpValidatorAddress;
@@ -325,7 +327,7 @@ export async function logQuestion(
 
     // Log Question Data to Recall (including the paymentUID)
     const key = getQuestionKey(requestContext); // Ensure getQuestionKey is defined
-    const data: QuestionData = { question, cid, status: 'PendingAnswer', timestamp: new Date().toISOString(), requestContext, paymentUID };
+    const data: QuestionData = { question, cid, status: 'PendingAnswer', timestamp: new Date().toISOString(), requestContext, paymentUID, user };
     const result = await addObjectToBucket(data, key); // Ensure addObjectToBucket is defined/imported
     return handleLogResult('Question', requestContext, null, result); // Ensure handleLogResult is defined/imported
 }
@@ -346,8 +348,8 @@ export async function logAnswer(
     fulfillmentUID: string,
     validationUID?: string | null
 ): Promise<string | undefined> {
-    const agentAddr = 
-    getAddress(answeringAgentId);
+    const agentAddr =
+        getAddress(answeringAgentId);
     const key = getAnswerKey(requestContext, agentAddr);
     const data: AnswerData = { // Construct the object
         answer,
@@ -433,27 +435,45 @@ export async function getRequestStatus(requestContext: string): Promise<RequestS
     const answerPrefix = getAnswersPrefix(requestContext);
 
     // Helper to fetch and parse JSON object, returning null on error/not found
-    async function fetchObject<T>(key: string): Promise<T | null> {
-        try {
-            // console.log(`[Recall Service Status] Fetching object: ${key}`);
-            const { result: objectBuf } = await recall.bucketManager().get(bucketAddr, key);
-            if (!objectBuf) {
-                // console.log(`[Recall Service Status] Object not found: ${key}`);
+    async function fetchObject<T>(key: string, maxRetries = BUCKET_ERROR, retryDelay = 1000): Promise<T | null> {
+        let retries = 0;
+
+        while (retries <= maxRetries) {
+            try {
+                // console.log(`[Recall Service Status] Fetching object: ${key}`);
+                const { result: objectBuf } = await recall.bucketManager().get(bucketAddr, key);
+                if (!objectBuf) {
+                    // console.log(`[Recall Service Status] Object not found: ${key}`);
+                    return null;
+                }
+                // Use Buffer.from for Node.js environment
+                return JSON.parse(Buffer.from(objectBuf).toString('utf8')) as T;
+            } catch (error: any) {
+                // Don't retry on "Not Found" errors
+                if (error.message?.includes('Not Found') || error.message?.includes('object not found')) {
+                    // console.log(`[Recall Service Status] Object confirmed not found: ${key}`);
+                    return null;
+                }
+
+                // For other errors, try to retry
+                if (retries < maxRetries) {
+                    console.warn(`[Recall Service Status] Fetch error for key ${key} (attempt ${retries + 1}/${maxRetries}): ${error.message?.substring(0, 150)}`);
+                    retries++;
+
+                    // Exponential backoff
+                    const backoffDelay = retryDelay * Math.pow(2, retries - 1);
+                    await new Promise(resolve => setTimeout(resolve, backoffDelay));
+                    continue;
+                }
+
+                // Final attempt failed
+                console.warn(`[Recall Service Status] All retry attempts failed for key ${key}: ${error.message?.substring(0, 150)}`);
                 return null;
             }
-            // Use Buffer.from for Node.js environment
-            return JSON.parse(Buffer.from(objectBuf).toString('utf8')) as T;
-        } catch (error: any) {
-            // Log errors other than "Not Found"
-            if (!error.message?.includes('Not Found') && !error.message?.includes('object not found')) {
-                console.warn(`[Recall Service Status] Fetch error for key ${key}: ${error.message?.substring(0, 150)}`);
-            } else {
-                // console.log(`[Recall Service Status] Object confirmed not found: ${key}`);
-            }
-            return null;
         }
-    }
 
+        return null;
+    }
     // Using YOUR original checkAnswersExist function signature
     async function checkAnswersExist(prefix: string): Promise<boolean> {
         try {

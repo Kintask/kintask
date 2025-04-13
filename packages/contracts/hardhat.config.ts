@@ -79,7 +79,12 @@ const config: HardhatUserConfig = {
           SUBMITTER_PK        // evidenceSubmitter = index 4
       ].filter(key => key !== ""),
       chainId: CALIBRATION_CHAIN_ID,
-      timeout: 120000, // 120 seconds
+      timeout: 300000, // Increased to 5 minutes (from 120 seconds)
+      gasPrice: 50000000000, // 50 Gwei - Higher for Calibration network
+      gas: 8000000, // Higher gas limit for contract deployments
+      // confirmations: 2, // Wait for 2 confirmations
+      // networkCheckTimeout: 100000,
+      // Remove the httpHeaders configuration that's causing the error
     },
     hardhat: {
         chainId: 31337
@@ -114,6 +119,9 @@ const config: HardhatUserConfig = {
     enabled: process.env.REPORT_GAS !== undefined,
     currency: "USD",
   },
+  mocha: {
+    timeout: 300000 // 5 minutes for tests
+  }
 };
 
 export default config;

@@ -77,6 +77,7 @@ export interface QuestionData {
     paymentUID?: string; // UID of the ERC20PaymentStatement attestation
     paymentRef?: string; // Optional reference string related to payment
     callbackUrl?: string; // Optional URL to notify upon completion/error
+    user?: string // MetaMaskWallet
 }
 
 // AnswerData (submitted by agents)

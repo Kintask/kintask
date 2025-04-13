@@ -4,7 +4,7 @@ import { logQuestion } from '../services/recallService'; // Function to store qu
 import { isValidCid } from '../utils'; // Utility for CID validation
 
 export async function handleAskRequest(req: Request, res: Response, next: NextFunction): Promise<void> {
-  const { question, knowledgeBaseCid } = req.body;
+  const { question, knowledgeBaseCid, user} = req.body;
   // Generate a unique ID for this request flow
   const uniqueRequestContext = `req_${Date.now()}_${Math.random().toString(16).substring(2, 8)}`;
 
@@ -25,7 +25,7 @@ export async function handleAskRequest(req: Request, res: Response, next: NextFu
   try {
     // --- Store the question and CID in Recall ---
     // This function handles interaction with the Recall service
-    const recallKey = await logQuestion(question, knowledgeBaseCid, uniqueRequestContext);
+    const recallKey = await logQuestion(question, knowledgeBaseCid, uniqueRequestContext, user);
 
     if (!recallKey) {
         // If logging fails, it's a server-side issue
