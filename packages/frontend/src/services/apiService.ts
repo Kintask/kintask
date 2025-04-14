@@ -13,18 +13,21 @@ import {
 } from '@/types'; // Adjust path as needed if using aliases, otherwise use relative path './types'
 
 
-const API_BASE_URL = '/api'; // For real API calls (uses Vite proxy)
+const isProduction = window.location.hostname !== 'localhost';
+const API_BASE_URL = isProduction 
+    ? (import.meta.env.VITE_API_URL || 'https://57c9-189-216-169-29.ngrok-free.app/api')
+    : '/api';  // Development (localhost)
 const DEFAULT_TIMEOUT = 600000; // Default timeout for requests
 
 // Create a base axios instance with common headers
 const apiClient = axios.create({
-    baseURL: API_BASE_URL,
-    timeout: DEFAULT_TIMEOUT,
-    headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json',
-        'ngrok-skip-browser-warning': 'true' // Added to bypass ngrok warning
-    }
+  baseURL: API_BASE_URL,
+  timeout: DEFAULT_TIMEOUT,
+  headers: {
+      'Content-Type': 'application/json',
+      'Accept': 'application/json',
+      'ngrok-skip-browser-warning': 'true' // Added to bypass ngrok warning
+  }
 });
 
 const ASK_REQUEST_TIMEOUT = 180000; // 180 seconds (3 minutes) - ADJUST THIS VALUE AS NEEDED

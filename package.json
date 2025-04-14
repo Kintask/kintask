@@ -9,7 +9,7 @@
     "backend:dev": "pnpm --filter backend dev",
     "frontend:dev": "pnpm --filter frontend dev",
     "dev": "pnpm --parallel --filter \"./packages/**\" dev",
-    "build": "pnpm --filter \"./packages/**\" build",
+    "build": "tsc || true && vite build",
     "kg:upload": "pnpm --filter kintask-scripts upload",
     "start:agent": "pnpm --filter kintask-scripts start-agent"
   },

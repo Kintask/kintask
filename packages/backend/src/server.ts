@@ -21,8 +21,13 @@ const port = config.port;
 app.set('etag', false); // Disable Etag generation globally
 
 // --- Middleware ---
-app.use(cors()); // Enable Cross-Origin Resource Sharing
-app.use(express.json({ limit: '1mb' })); // Parse JSON request bodies, limit size
+// Replace line 24 with this more permissive CORS configuration
+app.use(cors({
+    origin: '*',               // Allow all origins
+    methods: ['GET', 'POST'],  // Specify allowed HTTP methods
+    allowedHeaders: ['Content-Type', 'Authorization', 'ngrok-skip-browser-warning'],
+    credentials: true
+  }));app.use(express.json({ limit: '1mb' })); // Parse JSON request bodies, limit size
 // Basic request logger
 app.use((req: Request, res: Response, next: NextFunction) => {
     const start = Date.now();
