@@ -29,7 +29,7 @@ const POLLING_INTERVAL_MS = 10000;
 
 // Define terminal statuses
 const TERMINAL_STATUSES: VerificationStatus[] = [
-    'Completed', 'Verified', 'Flagged: Uncertain', 'Flagged: Contradictory',
+    'Completed','PendingPayout', 'Verified', 'Flagged: Uncertain', 'Flagged: Contradictory',
     'NoValidAnswers', 'EvaluationFailed', 'PayoutComplete',
     'Error: Verification Failed', 'Error: Evaluation Failed', 'Error: Timelock Failed',
     'Error: Polling Failed', 'Error: No Valid Answers', 'Error: Network/Server Issue',
@@ -40,7 +40,7 @@ const TERMINAL_STATUSES: VerificationStatus[] = [
 // Define non-terminal statuses
 const PENDING_STATUSES: VerificationStatus[] = [
     'PendingAnswer', 'Processing', 'PendingVerification', 'PendingEvaluation',
-    'PendingPayout', 'Submitted', 'Unverified'
+    'Submitted', 'Unverified'
 ];
 
 // --- Helper Function ---
@@ -136,7 +136,6 @@ function App() {
             .map((qData): HistoryEntry | null => {
                 if (!qData?.requestContext || !qData.question || !qData.cid || !qData.status) return null;
                 const isPendingStatus = !TERMINAL_STATUSES.includes(qData.status as VerificationStatus);
-        
                 if (isPendingStatus) {
                     initialPending.set(qData.requestContext, { 
                         question: qData.question, 
@@ -144,7 +143,7 @@ function App() {
                         lastStatus: qData.status 
                     });
                 }
-                
+
                 return {
                     requestContext: qData.requestContext,
                     questionText: qData.question,
@@ -373,14 +372,6 @@ function App() {
 
                                 // --- MODIFICATION START ---
 
-                                // Priority Check: Close modal immediately if evaluation.json exists
-                                // This assumes 'result' object has a boolean property 'evaluationFileExists'
-                                if (result.evaluationFileExists === true) {
-                                    console.log("Evaluation file exists, closing loading modal."); // Optional logging
-                                    setIsLoadingModalVisible(false);
-                                    setIsApiCallInProgress(false);
-
-                                }
 
                                 // Commented out: Condition to close modal on PendingPayout is removed as requested
                                 // if (currentStatus === "PendingPayout") {
@@ -414,6 +405,8 @@ function App() {
                                         text: finalResult.answer || (currentStatus === 'NoValidAnswers' ? "[No valid answer submitted]" : "[No answer content received]"),
                                         verificationResult: finalResult, requestContext: contextId
                                     };
+                                    setIsLoadingModalVisible(false);
+                                    setIsApiCallInProgress(false);
                                     setMessages(prev => [
                                         ...prev.filter(m => m.requestContext !== contextId || m.sender === 'User'),
                                         finalAiMessage
