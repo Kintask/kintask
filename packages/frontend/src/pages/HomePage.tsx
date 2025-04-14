@@ -6,7 +6,6 @@ const filecoinImage = 'https://res.coinpaper.com/coinpaper/filecoin_fil_logo_31a
 const recallImage = 'https://imgs.search.brave.com/FfNdCZmHms2k4WRe1Hw1u3xXKW_NcM9-uj14XFWoiCc/rs:fit:500:0:0:0/g:ce/aHR0cHM6Ly9pbWFn/ZS5waXRjaGJvb2su/Y29tL0ZTR0s1cXhz/NlUwMXVzVjdZcG5S/bkZqa0h0YTE3Mzk5/NjMyOTcyNzlfMjAw/eDIwMA.jpeg'; // A recall icon or similar.  REPLACE THIS.  Needs a better icon.
 const generatorImage = 'https://img.icons8.com/color/96/artificial-intelligence.png'; // AI brain icon
 const verifierImage = 'https://img.icons8.com/color/96/verified-account.png'; // Verified account icon
-const knowledgeGraphImage = 'https://img.icons8.com/fluency/96/mind-map.png'; // Mind map or knowledge graph icon
 const coophive = 'coophive.png'; // Mind map or knowledge graph icon
 
 // Kintask Logo Path (assuming it's in the public folder)
@@ -144,11 +143,6 @@ const HomePage: React.FC = () => {
                 image: generatorImage,
               },
               {
-                title: "Verifier Agent",
-                description: "The Verifier Agent checks the Generator's answer for accuracy using a reliable Knowledge Graph.",
-                image: verifierImage,
-              },
-              {
                 title: "Coophive",
                 description: "Using Coophive Ethereum Attestation Service (EAS) to validate data.",
                 image: coophive,
@@ -196,7 +190,6 @@ const HomePage: React.FC = () => {
                 "The Generator Agent provides an initial answer",
                 "The Verifier Agent checks the answer against the Modular Knowledge Graph on Filecoin",
                 "The Verifier Agent logs its reasoning steps on the Recall Network",
-                "The Verifier Agent commits its final verdict using Timelock Encryption",
                 "The final verifiable answer and reasoning trace are available for review",
               ].map((step, index) => (
                 <motion.div
