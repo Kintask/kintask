@@ -135,7 +135,7 @@ function App() {
             const fetchedHistory: HistoryEntry[] = response
                 .map(async (qData): HistoryEntry | null => {
                     if (!qData?.requestContext || !qData.question || !qData.cid || !qData.status) return null;
-                    const isFinished = await checkEvaluationStatus(qData.requestContext);
+                    //const isFinished = await checkEvaluationStatus(qData.requestContext);
                     const isPendingStatus = !TERMINAL_STATUSES.includes(qData.status as VerificationStatus);
                     if (isPendingStatus) {
                         initialPending.set(qData.requestContext, { question: qData.question, kbCid: qData.cid, lastStatus: qData.status });
@@ -145,7 +145,7 @@ function App() {
                         questionText: qData.question,
                         knowledgeBaseCid: qData.cid,
                         submissionTimestamp: qData.timestamp,
-                        finalResult: isFinished.evaluated ? {
+                        finalResult: !isPendingStatus ? {
                              status: qData.status, requestContext: qData.requestContext,
                              question: qData.question, kbCid: qData.cid,
                         } : null,
