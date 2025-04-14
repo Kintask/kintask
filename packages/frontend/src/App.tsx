@@ -137,17 +137,20 @@ function App() {
                     if (!qData?.requestContext || !qData.question || !qData.cid || !qData.status) return null;
                     //const isFinished = await checkEvaluationStatus(qData.requestContext);
                     const isPendingStatus = !TERMINAL_STATUSES.includes(qData.status as VerificationStatus);
+                    const isTerminalStatus = TERMINAL_STATUSES.includes(qData.status as VerificationStatus);
+
                     if (isPendingStatus) {
                         initialPending.set(qData.requestContext, { question: qData.question, kbCid: qData.cid, lastStatus: qData.status });
                     }
+                    console.log(qData)
                     return {
                         requestContext: qData.requestContext,
                         questionText: qData.question,
                         knowledgeBaseCid: qData.cid,
                         submissionTimestamp: qData.timestamp,
-                        finalResult: !isPendingStatus ? {
+                        finalResult: isTerminalStatus ? {
                              status: qData.status, requestContext: qData.requestContext,
-                             question: qData.question, kbCid: qData.cid,
+                             question: qData.question, kbCid: qData.cid,asnwer: qData.
                         } : null,
                     };
                 })
