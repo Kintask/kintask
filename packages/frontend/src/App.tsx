@@ -133,30 +133,32 @@ function App() {
             console.log(`[History] Received ${response.length} question entries.`);
             const initialPending = new Map<string, { question: string; kbCid: string; lastStatus?: VerificationStatus | string }>();
             const fetchedHistory: HistoryEntry[] = response
-                .map((qData): HistoryEntry | null => {
-                    if (!qData?.requestContext || !qData.question || !qData.cid || !qData.status) return null;
-                    //const isFinished = await checkEvaluationStatus(qData.requestContext);
-                    const isPendingStatus = !TERMINAL_STATUSES.includes(qData.status as VerificationStatus);
-                    const isTerminalStatus = TERMINAL_STATUSES.includes(qData.status as VerificationStatus);
-
-                    if (isPendingStatus) {
-                        initialPending.set(qData.requestContext, { question: qData.question, kbCid: qData.cid, lastStatus: qData.status });
-                    }
-                    console.log(qData)
-                    return {
+            .map((qData): HistoryEntry | null => {
+                if (!qData?.requestContext || !qData.question || !qData.cid || !qData.status) return null;
+                const isPendingStatus = !TERMINAL_STATUSES.includes(qData.status as VerificationStatus);
+        
+                if (isPendingStatus) {
+                    initialPending.set(qData.requestContext, { 
+                        question: qData.question, 
+                        kbCid: qData.cid, 
+                        lastStatus: qData.status 
+                    });
+                }
+                
+                return {
+                    requestContext: qData.requestContext,
+                    questionText: qData.question,
+                    knowledgeBaseCid: qData.cid,
+                    submissionTimestamp: qData.timestamp,
+                    finalResult: !isPendingStatus ? {
+                        status: qData.status, 
                         requestContext: qData.requestContext,
-                        questionText: qData.question,
-                        knowledgeBaseCid: qData.cid,
-                        submissionTimestamp: qData.timestamp,
-                        finalResult: isTerminalStatus ? {
-                             status: qData.status, requestContext: qData.requestContext,
-                             question: qData.question, kbCid: qData.cid,asnwer: qData.
-                        } : null,
-                    };
-                })
-                .filter((entry): entry is HistoryEntry => entry !== null)
-                .sort((a, b) => new Date(b.submissionTimestamp).getTime() - new Date(a.submissionTimestamp).getTime());
-
+                        question: qData.question, 
+                        kbCid: qData.cid,
+                        answer: qData.answer
+                    } : null,
+                };
+            })
             setUserHistory(fetchedHistory);
             setPendingRequests(initialPending);
             console.log(`[History] Processed ${fetchedHistory.length} entries. ${initialPending.size} requests pending polling.`);
