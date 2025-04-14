@@ -4,10 +4,10 @@ import { motion } from 'framer-motion';
 // Real Images and Icons (Replace with your own if you have them)
 const filecoinImage = 'https://res.coinpaper.com/coinpaper/filecoin_fil_logo_31acf6a7a9.png'; // Filecoin Logo
 const recallImage = 'https://imgs.search.brave.com/FfNdCZmHms2k4WRe1Hw1u3xXKW_NcM9-uj14XFWoiCc/rs:fit:500:0:0:0/g:ce/aHR0cHM6Ly9pbWFn/ZS5waXRjaGJvb2su/Y29tL0ZTR0s1cXhz/NlUwMXVzVjdZcG5S/bkZqa0h0YTE3Mzk5/NjMyOTcyNzlfMjAw/eDIwMA.jpeg'; // A recall icon or similar.  REPLACE THIS.  Needs a better icon.
-const timelockImage = 'https://img.icons8.com/fluency/96/time-machine.png'; // A time machine icon to represent Timelock Encryption.
 const generatorImage = 'https://img.icons8.com/color/96/artificial-intelligence.png'; // AI brain icon
 const verifierImage = 'https://img.icons8.com/color/96/verified-account.png'; // Verified account icon
 const knowledgeGraphImage = 'https://img.icons8.com/fluency/96/mind-map.png'; // Mind map or knowledge graph icon
+const coophive = 'coophive.png'; // Mind map or knowledge graph icon
 
 // Kintask Logo Path (assuming it's in the public folder)
 const kintaskLogoPath = 'kintask-favicon.png'; // Adjust path if needed
@@ -149,13 +149,13 @@ const HomePage: React.FC = () => {
                 image: verifierImage,
               },
               {
-                title: "Modular Knowledge Graph",
-                description: "The KG is broken down into atomic pieces of information, stored with verifiable origins.",
-                image: knowledgeGraphImage,
+                title: "Coophive",
+                description: "Using Coophive Ethereum Attestation Service (EAS) to validate data.",
+                image: coophive,
               },
               {
                 title: "Modular Knowledge on Filecoin",
-                description: "Knowledge fragments are stored on Filecoin, each with a content identifier (CID) and detailed provenance.",
+                description: "Using FVM to store and pay users",
                 image: filecoinImage,
               },
               {
@@ -163,11 +163,7 @@ const HomePage: React.FC = () => {
                 description: "The entire reasoning process is logged on the Recall Network, creating an auditable 'chain of thought'.",
                 image: recallImage,
               },
-              {
-                title: "Fair Commitment via Timelock Encryption",
-                description: "The Verifier agent commits its preliminary verdict using Timelock Encryption, ensuring fairness.",
-                image: timelockImage,
-              },
+  
             ].map((component, index) => (
               <motion.div
                 key={component.title}
