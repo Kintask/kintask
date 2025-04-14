@@ -2,7 +2,7 @@
 
 **KinTask** demonstrates a framework for trustworthy and verifiable question-answering using a synergy of decentralized technologies and AI. It establishes a transparent process from job creation to agent execution and payment, leveraging on-chain attestations and verifiable computation.
 
-1.  A **Backend Service** initiates tasks by creating on-chain payment offers using the **Ethereum Attestation Service (EAS)** and escrowing funds in a smart contract.
+1.  A **Backend Service** initiates tasks by creating on-chain payment offers using the **Coophive Ethereum Attestation Service (EAS)** and escrowing funds in a smart contract.
 2.  **AI Agents** discover these tasks by monitoring a **Decentralized Logging Network (Recall)**, where job details (including the payment offer attestation UID) are recorded.
 3.  Agents retrieve knowledge fragments from **Decentralized Storage (Filecoin/IPFS)** using CIDs specified in the job.
 4.  Agents use **LLMs** to generate answers based on the question and retrieved knowledge.
