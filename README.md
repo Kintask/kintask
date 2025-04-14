@@ -1,64 +1,73 @@
-# Kintask: Modular, Attributable & Fair AI Q&A
+# KinTask: Verifiable & Attributed AI Q&A
 
-**Kintask** is an advanced proof-of-concept AI system demonstrating how to build highly trustworthy and verifiable question-answering capabilities using a synergy of decentralized technologies. It features:
+**KinTask** demonstrates a framework for trustworthy and verifiable question-answering using a synergy of decentralized technologies and AI. It establishes a transparent process from job creation to agent execution and payment, leveraging on-chain attestations and verifiable computation.
 
-1.  A **Generator Agent** (LLM) providing initial answers.
-2.  A **Verifier Agent** meticulously checking these answers against a **Modular Knowledge Graph (KG)** composed of individual, provenance-rich fragments stored on **Filecoin**.
-3.  A **Commit-Reveal** mechanism using **Timelock Encryption** (via Blocklock) on an L2 blockchain to ensure the Verifier's initial judgment is fair and tamper-proof, managed by the `KintaskCommitment` contract.
-4.  A detailed, immutable **Reasoning Trace** logged step-by-step on the **Recall Network**, providing unprecedented transparency into the verification process and linking all components (question, answer, Filecoin fragments, Timelock commit).
+1.  A **Backend Service** initiates tasks by creating on-chain payment offers using the **Ethereum Attestation Service (EAS)** and escrowing funds in a smart contract.
+2.  **AI Agents** discover these tasks by monitoring a **Decentralized Logging Network (Recall)**, where job details (including the payment offer attestation UID) are recorded.
+3.  Agents retrieve knowledge fragments from **Decentralized Storage (Filecoin/IPFS)** using CIDs specified in the job.
+4.  Agents use **LLMs** to generate answers based on the question and retrieved knowledge.
+5.  Agents generate a **Zero-Knowledge Proof (ZKP)** (currently demonstrating proof-of-computation) verifying their work according to predefined rules.
+6.  Agents submit their results and ZKP proofs on-chain via **EAS Attestations** (`AnswerStatement`).
+7.  An on-chain **`ZKPValidator`** contract automatically verifies the submitted ZKP using a **`Groth16Verifier`** contract and issues a final **EAS Attestation** confirming the validation result.
+8.  A **Backend Evaluation Service** assesses the quality of the agent's answer (using an LLM) and checks for the successful on-chain ZKP validation attestation by querying **Recall**.
+9.  Based on both the LLM evaluation and the on-chain ZKP validation, the **Backend Service** triggers the release of escrowed funds from the **`ERC20PaymentStatement`** contract to the successful agent. The payment release itself is gated by the `ZKPValidator` acting as an **on-chain arbiter**.
+10. The entire lifecycle, including UIDs of all on-chain attestations (offer, answer submission, ZKP validation) and evaluation/payout results, is logged transparently on the **Recall Network**.
 
 ## The Problem
 
-Standard LLMs often lack verifiable grounding and can "hallucinate" – producing incorrect or nonsensical information with high confidence. Current AI systems offer little transparency into their reasoning process or the provenance of the information they use. This limits trust and accountability, especially for critical applications. Furthermore, ensuring fairness and preventing manipulation in AI decision-making processes is challenging.
+Standard LLMs often lack verifiable grounding and can "hallucinate" – producing incorrect or nonsensical information with high confidence. Current AI systems offer little transparency into their reasoning process or the data sources used. This limits trust and accountability. Furthermore, verifying that a remote agent actually performed the requested computation (like running an LLM or generating a proof) and ensuring fair payment for valid work is challenging in decentralized or open environments.
 
-## Our Solution: Kintask
+## Our Solution: KinTask
 
-Kintask tackles these issues head-on by integrating best-in-class decentralized technologies:
+KinTask addresses these issues by integrating cutting-edge Web3 technologies:
 
-*   **Modular Knowledge on Filecoin:** Instead of a monolithic block, knowledge is broken down into atomic fragments (facts, rules) stored individually on Filecoin. Each fragment carries its own CID and rich **provenance metadata** (source, curation, confidence, cross-chain attestations). This provides a verifiable, granular, and efficient foundation for truth.
-*   **Verifiable Reasoning on Recall:** The Verifier agent logs its *entire* multi-step reasoning process to the Recall Network – from identifying needed knowledge fragments (Filecoin CIDs) to applying logic, checking provenance, and calculating confidence. This creates an immutable, auditable "chain of thought."
-*   **Fair Commitment via Timelock Encryption:** Before revealing its detailed reasoning, the Verifier agent cryptographically commits its preliminary verdict using Timelock Encryption on an L2 chain via the `KintaskCommitment` contract. The commitment transaction ID is logged to Recall. The verdict can only be decrypted after a short delay, preventing manipulation and ensuring fairness.
-*   **Synergy:** Filecoin provides the *verifiable data*, Recall provides the *verifiable process*, and Timelock Encryption provides the *verifiable commitment*, creating a holistic trust layer for AI Q&A.
+*   **Decentralized Storage (Filecoin/IPFS):** Knowledge bases are referenced by Content Identifiers (CIDs), allowing agents to retrieve data from verifiable, decentralized storage networks.
+*   **Verifiable Computation (ZKPs):** Agents generate ZKPs to prove they performed the required computational steps (e.g., proof generation itself). This proof is verified *on-chain* by smart contracts, providing strong cryptographic assurance of execution.
+*   **On-Chain Attestations (EAS):** EAS provides a standardized, interoperable, and verifiable on-chain registry for crucial events: the initial job offer with escrowed payment (`ERC20PaymentStatement`), the agent's submission (`AnswerStatement`), and the result of the ZKP validation (`ZKPValidator`). This creates an immutable audit trail.
+*   **Automated Arbitration & Payment (Smart Contracts):** The payment contract (`ERC20PaymentStatement`) uses the `ZKPValidator` contract as an automated arbiter. Payment is released *only* if the `ZKPValidator` confirms (via its `checkFulfillment` function checking the final validation attestation) that the agent submitted a valid ZKP.
+*   **Transparent Logging (Recall Network):** The Recall Network provides a decentralized, tamper-resistant logbook for all off-chain events and pointers to on-chain transactions/attestations, making the entire workflow transparent and auditable by any participant.
 
-## Architecture Diagram (Kintask)
+## Architecture Diagram (KinTask - ZKP/EAS Flow)
+
+```mermaid
+graph TD;
+    A[User] --> B(Backend Service)
+    B --> C{Payment Contract}
+    B --> D[(Recall Network)]
+    
+    E[AI Agent] --> D
+    E --> F((LLM))
+    E --> G(ZKP Prover)
+    E --> H{Answer Contract}
+    E --> I{Validator Contract}
+    E --> D
+    
+    J(Evaluator Service) --> D
+    J --> F
+    J --> D
+    J --> C
+    
+    C --> I
+    I --> K[Agent Wallet]
+    
+    style C fill:#ccf,stroke:#333,stroke-width:2px
+    style H fill:#ccf,stroke:#333,stroke-width:2px
+    style I fill:#ccf,stroke:#333,stroke-width:2px
+    style D fill:#f9f,stroke:#333,stroke-width:2px
+    style F fill:#cff,stroke:#333,stroke-width:2px
+    style G fill:#cff,stroke:#333,stroke-width:2px
+    style K fill:#cfc,stroke:#333,stroke-width:2px
 ```
-graph LR
-    subgraph "User Browser (React Frontend)"
-        UI[Chat Interface] -- 1. Ask Question --> APIClient[API Client (axios)]
-    end
 
-    subgraph "Backend Server (Node.js/Express)"
-        APIClient -- 2. POST /api/verify --> Routes[/api/verify route]
-        Routes -- 3. --> Controller[Verify Controller]
-        Controller -- 4. Question --> Generator[Generator Service (OpenAI)]
-        Generator -- 5. Answer --> Controller
-        Controller -- 6. Q+A --> Verifier[Verifier Service]
 
-        subgraph "Verification Process within Verifier Service"
-            Verifier -- 7. Identify Needed Knowledge --> Index[KG Index (local/cached)]
-            Index -- 8. Get Relevant CIDs --> Verifier
-            Verifier -- 9. Fetch Fragments (by CIDs) --> FilecoinSvc[Filecoin Service (Web3.storage)]
-            FilecoinSvc -- 10. KG Fragments w/ Provenance --> Verifier
-            Verifier -- 11. Perform Logic -> Preliminary Verdict --> TimelockSvc[Timelock Service (Blocklock)]
-            TimelockSvc -- 12. Encrypt Verdict --> TimelockSvc
-            TimelockSvc -- 13. Commit Tx --> L2Contract[(KintaskCommitment on L2)]
-            L2Contract -- 14. RequestID --> TimelockSvc
-            TimelockSvc -- 15. Timelock RequestID --> Verifier
-            Verifier -- 16. Log Reasoning Steps w/ CIDs & RequestID --> RecallSvc[Recall Service]
-            RecallSvc -- 17. Multi-step Log --> RecallNet[(Recall Network)]
-            RecallNet -- 18. Log Confirmations --> RecallSvc
-            Verifier -- 19. Final Verdict, Used CIDs, RequestID --> Controller
-        end
+## Key Components Explained
 
-        Controller -- 20. Final Response --> Routes
-        Routes -- 21. JSON Response --> APIClient
-    end
-
-    subgraph "Asynchronous Reveal (Backend Listener / Separate Process)"
-        L2Contract -- 22. receiveBlocklock Callback (after delay) --> Listener[Timelock Listener Service]
-        Listener -- 23. Decrypt Verdict --> Listener
-        Listener -- 24. Log Reveal to Recall --> RecallSvc
-    end
-
-    APIClient -- 25. Display Result w/ Links & Trace --> UI
+*   **ERC20PaymentStatement:** A smart contract that holds escrowed funds and emits an EAS attestation representing the payment offer. It relies on an external `arbiter` contract to validate fulfillment before releasing payment.
+*   **AnswerStatement:** A smart contract used by agents to submit their results (or hashes thereof) and ZKP proof data as an EAS attestation. It references the original payment statement.
+*   **ZKPValidator:** A smart contract that acts as the designated `arbiter` for the `ERC20PaymentStatement`. It contains logic to verify ZKPs (by calling a separate `Verifier` contract) submitted via `AnswerStatement` attestations and issues its own EAS attestation confirming the validation result. Its `checkFulfillment` method is called by the payment contract during payout attempts.
+*   **Groth16Verifier:** A standard Solidity contract (generated by `snarkjs`) containing the verification key for the specific ZKP circuit used, capable of verifying proofs on-chain.
+*   **Ethereum Attestation Service (EAS):** The underlying infrastructure contract (on L2 or the target chain) used by the other contracts to create and register schema-based attestations on-chain.
+*   **Recall Network:** The off-chain decentralized logging layer used to store metadata, workflow status, and pointers (UIDs) to the on-chain attestations, facilitating discovery and coordination between participants.
+*   **Agent:** An off-chain script/program that monitors Recall, performs LLM inference, generates ZKPs, interacts with the smart contracts (submitting answers, triggering validation), and logs results back to Recall.
+*   **Backend / Evaluator Service:** Off-chain services responsible for accepting user requests, creating initial payment statements, optionally evaluating answer quality using LLMs, triggering the final payment release based on evaluation and ZKP validation, and logging status updates to Recall.
 
