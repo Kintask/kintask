@@ -133,7 +133,7 @@ function App() {
             console.log(`[History] Received ${response.length} question entries.`);
             const initialPending = new Map<string, { question: string; kbCid: string; lastStatus?: VerificationStatus | string }>();
             const fetchedHistory: HistoryEntry[] = response
-                .map(async (qData): HistoryEntry | null => {
+                .map((qData): HistoryEntry | null => {
                     if (!qData?.requestContext || !qData.question || !qData.cid || !qData.status) return null;
                     //const isFinished = await checkEvaluationStatus(qData.requestContext);
                     const isPendingStatus = !TERMINAL_STATUSES.includes(qData.status as VerificationStatus);
