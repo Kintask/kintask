@@ -2,8 +2,8 @@ import React from 'react';
 import { motion } from 'framer-motion';
 
 // Real Images and Icons (Replace with your own if you have them)
-const filecoinImage = 'https://cryptologos.cc/logos/filecoin-fil-logo.png?v=029'; // Filecoin Logo
-const recallImage = 'https://img.icons8.com/color/96/recall--v1.png'; // A recall icon or similar.  REPLACE THIS.  Needs a better icon.
+const filecoinImage = 'https://res.coinpaper.com/coinpaper/filecoin_fil_logo_31acf6a7a9.png'; // Filecoin Logo
+const recallImage = 'https://imgs.search.brave.com/FfNdCZmHms2k4WRe1Hw1u3xXKW_NcM9-uj14XFWoiCc/rs:fit:500:0:0:0/g:ce/aHR0cHM6Ly9pbWFn/ZS5waXRjaGJvb2su/Y29tL0ZTR0s1cXhz/NlUwMXVzVjdZcG5S/bkZqa0h0YTE3Mzk5/NjMyOTcyNzlfMjAw/eDIwMA.jpeg'; // A recall icon or similar.  REPLACE THIS.  Needs a better icon.
 const timelockImage = 'https://img.icons8.com/fluency/96/time-machine.png'; // A time machine icon to represent Timelock Encryption.
 const generatorImage = 'https://img.icons8.com/color/96/artificial-intelligence.png'; // AI brain icon
 const verifierImage = 'https://img.icons8.com/color/96/verified-account.png'; // Verified account icon
@@ -16,89 +16,88 @@ const HomePage: React.FC = () => {
   return (
     <div className="bg-gradient-to-b from-gray-50 to-white dark:from-gray-900 dark:to-gray-800 text-gray-800 dark:text-gray-200 font-sans antialiased">
       {/* Hero Section */}
-{/* Hero Section */}
-<header className="relative overflow-hidden bg-[#003399] min-h-screen flex flex-col"> {/* Added min-h-screen */}
+      <header className="relative overflow-hidden bg-[#003399] min-h-screen flex flex-col"> {/* Added min-h-screen */}
 
-{/* Background Logo Image (Centered, Behind Content) */}
-<div className="absolute inset-0 flex items-center justify-center z-0"> {/* Wrapper to help center */}
-     <img
-      src={kintaskLogoPath} // Assuming this is the path to the logo file
-      alt="" // Decorative background
-      className="
-        w-[600px] h-auto md:w-[900px] lg:w-[1200px] /* Large size */
-        max-w-[90vw] max-h-[80vh] /* Prevent excessive size */
-        object-contain /* Ensure entire logo is visible */
-        rounded-full /* <<< ADDED THIS LINE */
-
-        /* Removed absolute positioning here, handled by parent */
-      "
-    />
-</div>
-
-
-{/* Gradient Overlay - Above logo, below content */}
-<div className="absolute inset-0 bg-gradient-to-r from-kintask-blue/10 to-kintask-blue-light/10 dark:from-kintask-blue/20 dark:to-kintask-blue-light/20 z-10"></div>
-
-{/* Content Container - Positioned at the Bottom */}
-<div className="absolute bottom-0 left-0 right-0 z-20 px-4 pb-16 md:pb-20 lg:pb-24"> {/* Positioned bottom, added bottom padding */}
-  <div className="container mx-auto"> {/* Centering container */}
-    <motion.div
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.8, ease: "easeOut" }}
-      className="text-center"
-    >
-      {/* Main Logo (Removed - Assuming you want the subtitle/buttons only at bottom) */}
-      {/* If you still want the visible logo here, add the img tag back */}
-
-
-      {/* Subtitle - Adjust color for contrast if needed */}
-      <p className="text-xl md:text-2xl text-gray-200 dark:text-gray-300 mb-10 max-w-3xl mx-auto"> {/* Contrast adjusted for dark blue */}
-        Verifiable AI Q&A powered by decentralized technologies
-      </p>
-
-      {/* Call to Action Buttons - Adjust colors for contrast if needed */}
-      <div className="flex flex-col sm:flex-row justify-center items-center gap-4">
-         {/* Get Started Button */}
-         <a
-            href="/app"
+      {/* Background Logo Image (Centered, Behind Content) */}
+      <div className="absolute inset-0 flex items-center justify-center z-0"> {/* Wrapper to help center */}
+          <img
+            src={kintaskLogoPath} // Assuming this is the path to the logo file
+            alt="" // Decorative background
             className="
-              inline-block
-              bg-kintask-blue-light hover:bg-opacity-80 /* Adjusted for contrast */
-              text-[#003399] /* Adjusted for contrast */
-              dark:bg-kintask-blue-light dark:hover:bg-opacity-90
-              dark:text-gray-900
-              font-bold py-3 px-8 rounded-full
-              transition-all duration-300 ease-in-out
-              transform hover:scale-105
-              shadow-lg hover:shadow-xl
-              w-full sm:w-auto
+              w-[600px] h-auto md:w-[900px] lg:w-[1200px] /* Large size */
+              max-w-[90vw] max-h-[80vh] /* Prevent excessive size */
+              object-contain /* Ensure entire logo is visible */
+              rounded-full /* <<< ADDED THIS LINE */
+
+              /* Removed absolute positioning here, handled by parent */
             "
-         >
-           Get Started
-         </a>
-         {/* Learn More Button */}
-         <a
-            href="#learn-more"
-            className="
-              inline-block
-              border-2 border-kintask-blue-light /* Adjusted for contrast */
-              text-kintask-blue-light /* Adjusted for contrast */
-              dark:border-kintask-blue-light
-              dark:text-kintask-blue-light
-              font-bold py-3 px-8 rounded-full
-              transition-all duration-300 ease-in-out
-              hover:bg-kintask-blue-light/10 dark:hover:bg-kintask-blue-light/10
-              w-full sm:w-auto
-            "
-         >
-           Learn More
-         </a>
+          />
       </div>
-    </motion.div>
-  </div>
-</div>
-</header>
+
+
+      {/* Gradient Overlay - Above logo, below content */}
+      <div className="absolute inset-0 bg-gradient-to-r from-kintask-blue/10 to-kintask-blue-light/10 dark:from-kintask-blue/20 dark:to-kintask-blue-light/20 z-10"></div>
+
+      {/* Content Container - Positioned at the Bottom */}
+      <div className="absolute bottom-0 left-0 right-0 z-20 px-4 pb-16 md:pb-20 lg:pb-24"> {/* Positioned bottom, added bottom padding */}
+        <div className="container mx-auto"> {/* Centering container */}
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.8, ease: "easeOut" }}
+            className="text-center"
+          >
+            {/* Main Logo (Removed - Assuming you want the subtitle/buttons only at bottom) */}
+            {/* If you still want the visible logo here, add the img tag back */}
+
+
+            {/* Subtitle - Adjust color for contrast if needed */}
+            <p className="text-xl md:text-2xl text-gray-200 dark:text-gray-300 mb-10 max-w-3xl mx-auto"> {/* Contrast adjusted for dark blue */}
+              Verifiable AI Q&A powered by decentralized technologies
+            </p>
+
+            {/* Call to Action Buttons - Adjust colors for contrast if needed */}
+            <div className="flex flex-col sm:flex-row justify-center items-center gap-4">
+              {/* Get Started Button */}
+              <a
+                  href="/app"
+                  className="
+                    inline-block
+                    bg-kintask-blue-light hover:bg-opacity-80 /* Adjusted for contrast */
+                    text-[#003399] /* Adjusted for contrast */
+                    dark:bg-kintask-blue-light dark:hover:bg-opacity-90
+                    dark:text-gray-900
+                    font-bold py-3 px-8 rounded-full
+                    transition-all duration-300 ease-in-out
+                    transform hover:scale-105
+                    shadow-lg hover:shadow-xl
+                    w-full sm:w-auto
+                  "
+              >
+                Get Started
+              </a>
+              {/* Learn More Button */}
+              <a
+                  href="#learn-more"
+                  className="
+                    inline-block
+                    border-2 border-kintask-blue-light /* Adjusted for contrast */
+                    text-kintask-blue-light /* Adjusted for contrast */
+                    dark:border-kintask-blue-light
+                    dark:text-kintask-blue-light
+                    font-bold py-3 px-8 rounded-full
+                    transition-all duration-300 ease-in-out
+                    hover:bg-kintask-blue-light/10 dark:hover:bg-kintask-blue-light/10
+                    w-full sm:w-auto
+                  "
+              >
+                Learn More
+              </a>
+            </div>
+          </motion.div>
+        </div>
+      </div>
+      </header>
       <main className="container mx-auto px-4">
         {/* Challenge Section */}
         <section id="learn-more" className="py-20">
