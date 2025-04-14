@@ -524,7 +524,7 @@ function App() {
         if (pendingRequests.has(entry.requestContext)) {
             statusText = `Polling (${pendingRequests.get(entry.requestContext)?.lastStatus ?? 'Checking'})...`;
         } else if (entry.finalResult) {
-            statusText = entry.finalResult.status;
+            statusText = "Finished";
             if (entry.finalResult.evaluation && (entry.finalResult.status === 'Completed' || entry.finalResult.status === 'Verified' || entry.finalResult.status === 'PayoutComplete')) {
                 statusText += ` (${entry.finalResult.evaluation})`;
             }
