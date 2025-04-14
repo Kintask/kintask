@@ -70,4 +70,14 @@ graph TD;
 *   **Recall Network:** The off-chain decentralized logging layer used to store metadata, workflow status, and pointers (UIDs) to the on-chain attestations, facilitating discovery and coordination between participants.
 *   **Agent:** An off-chain script/program that monitors Recall, performs LLM inference, generates ZKPs, interacts with the smart contracts (submitting answers, triggering validation), and logs results back to Recall.
 *   **Backend / Evaluator Service:** Off-chain services responsible for accepting user requests, creating initial payment statements, optionally evaluating answer quality using LLMs, triggering the final payment release based on evaluation and ZKP validation, and logging status updates to Recall.
+```
+##FILECOIN CALIBRATION CONTRACTS
+
+SCHEMA_REGISTRY_ADDRESS=0x59FbE3666a597926FB8Cd90Ee2522B17c55dE6be
+EAS_CONTRACT_ADDRESS=0xdD658D6a7924bFB2f2e1aC927007D236d8c21612
+ANSWER_STATEMENT_ADDRESS=0xbA4F0782C2bBEEe84c04EC6659C46D800F8Ca6b1
+ERC20_PAYMENT_STATEMENT_ADDRESS=0x2A1C1840FEf2a91c5a290DC9C0f69EabaeECAb67
+ZKP_VALIDATOR_ADDRESS=0xa0e277683c4DA9139Dc26e11a4dCc6b93995C75C
+STRING_RESULT_STATEMENT_ADDRESS=0x43c93FE250e353AF2fbcB90210be1C7F3E046de8
+VERIFIER_ADDRESS=0x6031453CEa9DD504f7a32De0012a9C059ec85a7D
 
