@@ -145,7 +145,7 @@ function App() {
                         questionText: qData.question,
                         knowledgeBaseCid: qData.cid,
                         submissionTimestamp: qData.timestamp,
-                        finalResult: isFinished ? {
+                        finalResult: isFinished.evaluated ? {
                              status: qData.status, requestContext: qData.requestContext,
                              question: qData.question, kbCid: qData.cid,
                         } : null,
