@@ -50,13 +50,13 @@ graph TD;
     C --> I
     I --> K[Agent Wallet]
     
-    style C fill:#ccf,stroke:#333,stroke-width:2px
-    style H fill:#ccf,stroke:#333,stroke-width:2px
-    style I fill:#ccf,stroke:#333,stroke-width:2px
-    style D fill:#f9f,stroke:#333,stroke-width:2px
-    style F fill:#cff,stroke:#333,stroke-width:2px
-    style G fill:#cff,stroke:#333,stroke-width:2px
-    style K fill:#cfc,stroke:#333,stroke-width:2px
+    style C fill:#ccf,stroke:#333,stroke-width:2px,color:#000
+    style H fill:#ccf,stroke:#333,stroke-width:2px,color:#000
+    style I fill:#ccf,stroke:#333,stroke-width:2px,color:#000
+    style D fill:#f9f,stroke:#333,stroke-width:2px,color:#000
+    style F fill:#cff,stroke:#333,stroke-width:2px,color:#000
+    style G fill:#cff,stroke:#333,stroke-width:2px,color:#000
+    style K fill:#cfc,stroke:#333,stroke-width:2px,color:#000
 ```
 
 
